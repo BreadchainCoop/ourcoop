@@ -34,7 +34,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
     bytes32 private constant BASIS_POINTS_VOTING_MODULE_STORAGE =
         0x36e581454c484c4e200212d5304c93307b309208c9d5c05d80ca836f1eed6600;
 
-    function _getBasisPointsVotingModuleStorage() private pure returns (BasisPointsVotingModuleStorage storage $) {
+    function _getBasisPointsVotingModuleStorage() internal pure returns (BasisPointsVotingModuleStorage storage $) {
         assembly {
             $.slot := BASIS_POINTS_VOTING_MODULE_STORAGE
         }
@@ -177,7 +177,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
     /// @param voter Address of the voter
     /// @param points Array of points allocated to each recipient
     /// @param votingPower Total voting power of the voter
-    function _processVote(address voter, uint256[] calldata points, uint256 votingPower) internal override {
+    function _processVote(address voter, uint256[] calldata points, uint256 votingPower) internal override virtual {
         AbstractVotingModuleStorage storage base = _getAbstractVotingModuleStorage();
         BasisPointsVotingModuleStorage storage $ = _getBasisPointsVotingModuleStorage();
         uint256 currentCycle = base.cycleModule.getCurrentCycle();
