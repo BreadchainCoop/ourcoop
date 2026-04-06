@@ -7,6 +7,8 @@ import {AbstractCycleModule} from "../abstract/AbstractCycleModule.sol";
 /// @notice Concrete implementation of the cycle module
 /// @dev Extends AbstractCycleModule with any protocol-specific logic
 contract CycleModule is AbstractCycleModule {
-    /// @notice Constructor only sets up authorization (via parent constructor)
-    constructor() AbstractCycleModule() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 }

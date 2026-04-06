@@ -12,6 +12,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract MultiStrategyDistributionManager is AbstractDistributionManager {
     using SafeERC20 for IERC20;
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     // ============ EIP-7201 Namespaced Storage ============
 
     /// @custom:storage-location erc7201:crowdstake.storage.MultiStrategyDistributionManager
@@ -52,15 +57,17 @@ contract MultiStrategyDistributionManager is AbstractDistributionManager {
     /// @param _baseToken Address of the base token with yield
     /// @param _votingModule Address of the voting module
     /// @param _strategies Array of distribution strategies to distribute to
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
     function initialize(
         address _cycleManager,
         address _recipientRegistry,
         address _baseToken,
         address _votingModule,
-        IDistributionStrategy[] calldata _strategies
+        IDistributionStrategy[] calldata _strategies,
+        address _owner
     ) external initializer {
         // Initialize parent AbstractDistributionManager
-        __AbstractDistributionManager_init(_cycleManager, _recipientRegistry, _baseToken, _votingModule);
+        __AbstractDistributionManager_init(_cycleManager, _recipientRegistry, _baseToken, _votingModule, _owner);
 
         // Store strategies
         require(_strategies.length > 0, "No strategies provided");

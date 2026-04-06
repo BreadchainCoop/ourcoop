@@ -11,16 +11,22 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract EqualDistributionStrategy is AbstractDistributionStrategy {
     using SafeERC20 for IERC20;
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initializes the equal distribution strategy
     /// @dev Sets up the strategy with yield token, recipient registry, and distribution manager
     /// @param _yieldToken Address of the yield token to distribute
     /// @param _recipientRegistry Address of the recipient registry
     /// @param _distributionManager Address of the distribution manager
-    function initialize(address _yieldToken, address _recipientRegistry, address _distributionManager)
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
+    function initialize(address _yieldToken, address _recipientRegistry, address _distributionManager, address _owner)
         external
         initializer
     {
-        __AbstractDistributionStrategy_init(_yieldToken, _recipientRegistry, _distributionManager);
+        __AbstractDistributionStrategy_init(_yieldToken, _recipientRegistry, _distributionManager, _owner);
     }
 
     /// @notice Distributes yield equally among all recipients

@@ -12,6 +12,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract VotingDistributionStrategy is AbstractDistributionStrategy {
     using SafeERC20 for IERC20;
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     // ============ EIP-7201 Namespaced Storage ============
 
     /// @custom:storage-location erc7201:crowdstake.storage.VotingDistributionStrategy
@@ -56,13 +61,15 @@ contract VotingDistributionStrategy is AbstractDistributionStrategy {
     /// @param _recipientRegistry Address of the recipient registry
     /// @param _votingModule Address of the voting module
     /// @param _distributionManager Address of the distribution manager
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
     function initialize(
         address _yieldToken,
         address _recipientRegistry,
         address _votingModule,
-        address _distributionManager
+        address _distributionManager,
+        address _owner
     ) external initializer {
-        __AbstractDistributionStrategy_init(_yieldToken, _recipientRegistry, _distributionManager);
+        __AbstractDistributionStrategy_init(_yieldToken, _recipientRegistry, _distributionManager, _owner);
         if (_votingModule == address(0)) revert ZeroAddress();
         _getVotingDistributionStrategyStorage().votingModule = IVotingModule(_votingModule);
     }

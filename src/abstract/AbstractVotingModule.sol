@@ -132,17 +132,19 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
     /// @param _distributionModule Address of the distribution module
     /// @param _recipientRegistry Address of the recipient registry
     /// @param _cycleModule Address of the cycle module
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
     // solhint-disable-next-line func-name-mixedcase
     function __AbstractVotingModule_init(
         IVotingPowerStrategy[] calldata _strategies,
         address _distributionModule,
         address _recipientRegistry,
-        address _cycleModule
+        address _cycleModule,
+        address _owner
     ) internal onlyInitializing {
         if (_strategies.length == 0) revert NoStrategiesProvided();
 
         __EIP712_init(EIP712_NAME, EIP712_VERSION);
-        __Ownable_init(msg.sender);
+        __Ownable_init(_owner);
 
         if (_distributionModule == address(0)) revert ZeroAddress();
         if (_recipientRegistry == address(0)) revert ZeroAddress();

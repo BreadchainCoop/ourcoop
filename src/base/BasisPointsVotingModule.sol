@@ -68,11 +68,9 @@ contract BasisPointsVotingModule is AbstractVotingModule {
 
     // ============ Constructor ============
 
-    /// @notice Creates a new BasisPointsVotingModule instance
-    /// @dev Initializes the implementation contract. Must be initialized before use.
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-        // _disableInitializers(); // Only for proxy deployments
+        _disableInitializers();
     }
 
     // ============ Initialization ============
@@ -85,15 +83,17 @@ contract BasisPointsVotingModule is AbstractVotingModule {
     /// @param _distributionModule Address of the distribution module for reward allocation
     /// @param _recipientRegistry Address of the recipient registry for valid recipients
     /// @param _cycleModule Address of the cycle module for cycle management
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
     function initialize(
         uint256 _maxPoints,
         IVotingPowerStrategy[] calldata _strategies,
         address _distributionModule,
         address _recipientRegistry,
-        address _cycleModule
+        address _cycleModule,
+        address _owner
     ) external initializer {
         _getBasisPointsVotingModuleStorage().maxPoints = _maxPoints;
-        __AbstractVotingModule_init(_strategies, _distributionModule, _recipientRegistry, _cycleModule);
+        __AbstractVotingModule_init(_strategies, _distributionModule, _recipientRegistry, _cycleModule, _owner);
     }
 
     // ============ External Functions ============

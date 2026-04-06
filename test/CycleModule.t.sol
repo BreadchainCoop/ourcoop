@@ -4,6 +4,9 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {CycleModule} from "../src/implementation/CycleModule.sol";
 import {AbstractCycleModule} from "../src/abstract/AbstractCycleModule.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract CycleModuleTest is Test {
     CycleModule public cycleModule;
@@ -15,25 +18,27 @@ contract CycleModuleTest is Test {
 
     function setUp() public {
         vm.roll(START_BLOCK);
-        cycleModule = new CycleModule();
-        cycleModule.initialize(CYCLE_LENGTH);
+        CycleModule impl = new CycleModule();
+        bytes memory initData = abi.encodeWithSelector(AbstractCycleModule.initialize.selector, CYCLE_LENGTH, owner);
+        cycleModule = CycleModule(address(new ERC1967Proxy(address(impl), initData)));
     }
 
     function testInitialState() public view {
         assertEq(cycleModule.getCurrentCycle(), 1);
         assertEq(cycleModule.cycleLength(), CYCLE_LENGTH);
         assertEq(cycleModule.lastCycleStartBlock(), START_BLOCK);
-        assertTrue(cycleModule.authorized(owner));
-        assertTrue(cycleModule.initialized());
+        assertEq(cycleModule.owner(), owner);
     }
 
     function testCannotReinitialize() public {
-        vm.expectRevert(AbstractCycleModule.AlreadyInitialized.selector);
-        cycleModule.initialize(200);
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        cycleModule.initialize(200, owner);
     }
 
     function testNotInitializedFunctions() public {
-        CycleModule uninitializedModule = new CycleModule();
+        // Deploy a proxy without initialization data to get an uninitialized module
+        CycleModule impl = new CycleModule();
+        CycleModule uninitializedModule = CycleModule(address(new ERC1967Proxy(address(impl), "")));
 
         vm.expectRevert(AbstractCycleModule.NotInitialized.selector);
         uninitializedModule.getCurrentCycle();
@@ -82,22 +87,19 @@ contract CycleModuleTest is Test {
         cycleModule.startNewCycle();
     }
 
-    function testUnauthorizedCannotStartCycle() public {
+    function testNonOwnerCannotStartCycle() public {
         vm.roll(START_BLOCK + CYCLE_LENGTH);
 
         vm.prank(user);
-        vm.expectRevert(AbstractCycleModule.NotAuthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user));
         cycleModule.startNewCycle();
     }
 
-    function testAuthorization() public {
-        assertFalse(cycleModule.authorized(user));
+    function testOwnership() public {
+        assertEq(cycleModule.owner(), owner);
 
-        cycleModule.setAuthorization(user, true);
-        assertTrue(cycleModule.authorized(user));
-
-        cycleModule.setAuthorization(user, false);
-        assertFalse(cycleModule.authorized(user));
+        cycleModule.transferOwnership(user);
+        assertEq(cycleModule.owner(), user);
     }
 
     function testGetBlocksUntilNextCycle() public view {
@@ -139,18 +141,39 @@ contract CycleModuleTest is Test {
         cycleModule.updateCycleLength(0);
     }
 
-    function testUnauthorizedCannotUpdateCycleLength() public {
+    function testNonOwnerCannotUpdateCycleLength() public {
         vm.prank(user);
-        vm.expectRevert(AbstractCycleModule.NotAuthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user));
         cycleModule.updateCycleLength(200);
     }
 
-    function testUnauthorizedCannotInitialize() public {
-        CycleModule newModule = new CycleModule();
+    function testAnyoneCanInitializeOnce() public {
+        CycleModule impl = new CycleModule();
+        CycleModule newModule = CycleModule(address(new ERC1967Proxy(address(impl), "")));
 
         vm.prank(user);
-        vm.expectRevert(AbstractCycleModule.NotAuthorized.selector);
-        newModule.initialize(100);
+        newModule.initialize(100, user);
+
+        // User is now the owner
+        assertEq(newModule.owner(), user);
+        assertEq(newModule.cycleLength(), 100);
+
+        // Cannot reinitialize
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        newModule.initialize(200, user);
+    }
+
+    function testCannotInitializeWithZeroAddress() public {
+        CycleModule impl = new CycleModule();
+        CycleModule newModule = CycleModule(address(new ERC1967Proxy(address(impl), "")));
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableInvalidOwner.selector, address(0)));
+        newModule.initialize(100, address(0));
+    }
+
+    function testImplementationCannotBeInitialized() public {
+        CycleModule impl = new CycleModule();
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(100, owner);
     }
 
     function testMultipleCycles() public {

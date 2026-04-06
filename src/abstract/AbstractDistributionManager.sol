@@ -74,6 +74,21 @@ abstract contract AbstractDistributionManager is Initializable, OwnableUpgradeab
         return _getAbstractDistributionManagerStorage().baseToken;
     }
 
+    // ============ Events ============
+
+    /// @notice Emitted when the voting module is set or changed
+    event VotingModuleSet(address indexed votingModule);
+
+    // ============ Admin ============
+
+    /// @notice Sets the voting module reference
+    /// @param _votingModule Address of the voting module
+    function setVotingModule(address _votingModule) external onlyOwner {
+        if (_votingModule == address(0)) revert ZeroAddress();
+        _getAbstractDistributionManagerStorage().votingModule = IVotingModule(_votingModule);
+        emit VotingModuleSet(_votingModule);
+    }
+
     // ============ Initialization ============
 
     /// @dev Initializes the distribution manager
@@ -81,13 +96,15 @@ abstract contract AbstractDistributionManager is Initializable, OwnableUpgradeab
     /// @param _recipientRegistry Address of the recipient registry
     /// @param _baseToken Address of the base token with yield
     /// @param _votingModule Address of the voting module
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
     function __AbstractDistributionManager_init(
         address _cycleManager,
         address _recipientRegistry,
         address _baseToken,
-        address _votingModule
+        address _votingModule,
+        address _owner
     ) internal onlyInitializing {
-        __Ownable_init(msg.sender);
+        __Ownable_init(_owner);
         __AbstractDistributionManager_init_unchained(_cycleManager, _recipientRegistry, _baseToken, _votingModule);
     }
 
