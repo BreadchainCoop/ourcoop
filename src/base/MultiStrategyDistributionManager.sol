@@ -82,6 +82,7 @@ contract MultiStrategyDistributionManager is AbstractDistributionManager {
     /// @notice Checks if distribution is ready based on cycle completion, votes, recipients, strategies, and yield
     /// @return ready True if cycle is complete, there are votes, recipients, configured strategies, and sufficient yield
     function isDistributionReady() public view override returns (bool ready) {
+        if (cycleManager().distributionManager() != address(this)) return false;
         if (!cycleManager().isCycleComplete()) return false;
 
         uint256 totalVotes = getTotalCurrentVotingPower();
@@ -135,6 +136,9 @@ contract MultiStrategyDistributionManager is AbstractDistributionManager {
 
             emit YieldDistributed(address(strategy), amountPerStrategy);
         }
+
+        // Advance cycle atomically with distribution
+        cycleManager().startNewCycle();
     }
 
     /// @notice Gets all configured strategies
