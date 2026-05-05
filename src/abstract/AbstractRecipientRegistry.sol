@@ -24,9 +24,15 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
         /// @notice Mapping to quickly check if an address is an active recipient
         /// @dev Maps recipient address to true if active, false otherwise
         mapping(address => bool) isRecipientMapping;
+        /// @notice Mapping to quickly check if an address is queued for addition
+        /// @dev Maps recipient address to true if queued for addition, false otherwise
+        mapping(address => bool) isQueuedForAdditionMapping;
+        /// @notice Mapping to quickly check if an address is queued for removal
+        /// @dev Maps recipient address to true if queued for removal, false otherwise
+        mapping(address => bool) isQueuedForRemovalMapping;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("crowdstake.storage.AbstractRecipientRegistry")) - 1)) & ~bytes32(uint256(0xff))
+    /// keccak256(abi.encode(uint256(keccak256("crowdstake.storage.AbstractRecipientRegistry")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ABSTRACT_RECIPIENT_REGISTRY_STORAGE =
         0x347caeef91698b68f09c13de18e96db5bda028445fd11b86dc029946f360f200;
 
@@ -35,6 +41,9 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
             $.slot := ABSTRACT_RECIPIENT_REGISTRY_STORAGE
         }
     }
+
+    /// @notice Maximum queue size
+    uint256 private constant MAX_QUEUE_SIZE = 100;
 
     // ============ Public Getters ============
 
@@ -89,14 +98,10 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
         AbstractRecipientRegistryStorage storage $ = _getAbstractRecipientRegistryStorage();
         if (recipient == address(0)) revert InvalidRecipient();
         if ($.isRecipientMapping[recipient]) revert RecipientAlreadyExists();
+        if ($.isQueuedForAdditionMapping[recipient]) revert RecipientAlreadyQueued();
+        if ($.queuedRecipientsForAddition.length + 1 > MAX_QUEUE_SIZE) revert MaxQueueSizeReached();
 
-        // Check if already queued to prevent duplicates
-        for (uint256 i = 0; i < $.queuedRecipientsForAddition.length; i++) {
-            if ($.queuedRecipientsForAddition[i] == recipient) {
-                revert RecipientAlreadyQueued();
-            }
-        }
-
+        $.isQueuedForAdditionMapping[recipient] = true;
         $.queuedRecipientsForAddition.push(recipient);
         emit RecipientQueued(recipient, true);
     }
@@ -109,15 +114,12 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
     /// @dev Access control should be implemented in the calling public function
     function _queueForRemoval(address recipient) internal {
         AbstractRecipientRegistryStorage storage $ = _getAbstractRecipientRegistryStorage();
+        if (recipient == address(0)) revert InvalidRecipient();
         if (!$.isRecipientMapping[recipient]) revert RecipientNotFound();
+        if ($.isQueuedForRemovalMapping[recipient]) revert RecipientAlreadyQueued();
+        if ($.queuedRecipientsForRemoval.length + 1 > MAX_QUEUE_SIZE) revert MaxQueueSizeReached();
 
-        // Check if already queued for removal to prevent duplicates
-        for (uint256 i = 0; i < $.queuedRecipientsForRemoval.length; i++) {
-            if ($.queuedRecipientsForRemoval[i] == recipient) {
-                revert RecipientAlreadyQueued();
-            }
-        }
-
+        $.isQueuedForRemovalMapping[recipient] = true;
         $.queuedRecipientsForRemoval.push(recipient);
         emit RecipientQueued(recipient, false);
     }
@@ -144,6 +146,7 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
             address recipient = addedList[i];
             $.recipients.push(recipient);
             $.isRecipientMapping[recipient] = true;
+            $.isQueuedForAdditionMapping[recipient] = false;
             emit RecipientAdded(recipient);
         }
 
@@ -161,6 +164,7 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
                     if (recipient == removedList[j]) {
                         shouldRemove = true;
                         $.isRecipientMapping[recipient] = false;
+                        $.isQueuedForRemovalMapping[recipient] = false;
                         emit RecipientRemoved(recipient);
                         break;
                     }
@@ -184,14 +188,22 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
     /// @dev Only owner can clear the queue. Use this to cancel all pending additions
     /// @dev This will remove all addresses from the addition queue without adding them
     function clearAdditionQueue() external onlyOwner {
-        delete _getAbstractRecipientRegistryStorage().queuedRecipientsForAddition;
+        AbstractRecipientRegistryStorage storage $ = _getAbstractRecipientRegistryStorage();
+        for (uint256 i = 0; i < $.queuedRecipientsForAddition.length; i++) {
+            $.isQueuedForAdditionMapping[$.queuedRecipientsForAddition[i]] = false;
+        }
+        delete $.queuedRecipientsForAddition;
     }
 
     /// @notice Clear the removal queue without processing
     /// @dev Only owner can clear the queue. Use this to cancel all pending removals
     /// @dev This will remove all addresses from the removal queue without removing them
     function clearRemovalQueue() external onlyOwner {
-        delete _getAbstractRecipientRegistryStorage().queuedRecipientsForRemoval;
+        AbstractRecipientRegistryStorage storage $ = _getAbstractRecipientRegistryStorage();
+        for (uint256 i = 0; i < $.queuedRecipientsForRemoval.length; i++) {
+            $.isQueuedForRemovalMapping[$.queuedRecipientsForRemoval[i]] = false;
+        }
+        delete $.queuedRecipientsForRemoval;
     }
 
     /// @notice Get all active recipients
@@ -226,26 +238,14 @@ abstract contract AbstractRecipientRegistry is IRecipientRegistry, OwnableUpgrad
     /// @param recipient Address to check in the addition queue
     /// @return isQueued True if the address is queued for addition, false otherwise
     function isQueuedForAddition(address recipient) external view returns (bool isQueued) {
-        AbstractRecipientRegistryStorage storage $ = _getAbstractRecipientRegistryStorage();
-        for (uint256 i = 0; i < $.queuedRecipientsForAddition.length; i++) {
-            if ($.queuedRecipientsForAddition[i] == recipient) {
-                return true;
-            }
-        }
-        return false;
+        return _getAbstractRecipientRegistryStorage().isQueuedForAdditionMapping[recipient];
     }
 
     /// @notice Check if an address is queued for removal
     /// @param recipient Address to check in the removal queue
     /// @return isQueued True if the address is queued for removal, false otherwise
     function isQueuedForRemoval(address recipient) external view returns (bool isQueued) {
-        AbstractRecipientRegistryStorage storage $ = _getAbstractRecipientRegistryStorage();
-        for (uint256 i = 0; i < $.queuedRecipientsForRemoval.length; i++) {
-            if ($.queuedRecipientsForRemoval[i] == recipient) {
-                return true;
-            }
-        }
-        return false;
+        return _getAbstractRecipientRegistryStorage().isQueuedForRemovalMapping[recipient];
     }
 
     /// @notice Check if an address is currently an active recipient
