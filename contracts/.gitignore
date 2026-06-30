@@ -1,0 +1,13 @@
+# Foundry compiler output
+cache/
+out/
+
+# Broadcast logs (regenerable)
+broadcast/
+
+# Foundry lock + docs
+foundry.lock
+docs/
+
+# Dotenv
+.env
