@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { type Address } from "viem";
-import { Body, Button, Caption } from "@breadcoop/ui";
+import { Body, Caption } from "@breadcoop/ui";
 import { CheckCircle } from "@phosphor-icons/react";
 import {
   Card,
@@ -10,13 +10,13 @@ import {
   PageHeader,
   ProgressBar,
 } from "@/components/dapp/ui";
-import { ConnectGate } from "@/components/dapp/connect-gate";
+import { ActionButton } from "@/components/dapp/action-button";
 import { TxStatus } from "@/components/dapp/tx-status";
 import { useRecipients } from "@/hooks/use-recipients";
 import { useVote, useVotingState } from "@/hooks/use-voting";
 import { useCycle } from "@/hooks/use-cycle";
 import { formatAmount, shortenAddress } from "@/lib/format";
-import { MAX_POINTS, addressUrl } from "@/lib/constants";
+import { addressUrl } from "@/lib/constants";
 
 export default function VotePage() {
   return (
@@ -25,9 +25,7 @@ export default function VotePage() {
         title="Vote"
         subtitle="Allocate your voting power across recipients. Yield is distributed proportionally to the community's weighted votes each cycle."
       />
-      <ConnectGate>
-        <VoteForm />
-      </ConnectGate>
+      <VoteForm />
     </div>
   );
 }
@@ -67,6 +65,16 @@ function VoteForm() {
   const points = recipients.map((r) =>
     BigInt(Math.round((weights[r] ?? 0) * 100)),
   ); // % → basis points
+
+  const maxPercent = Number(voting.maxPoints) / 100;
+  // Time-weighted voting power is 0 until it accrues within the cycle; voting
+  // then "succeeds" but records nothing and locks you out — block it.
+  const noPower = !voting.votingPower || voting.votingPower === 0n;
+  // The contract requires points.length == recipient count; if the recipient
+  // set changed under us, refuse rather than revert.
+  const lengthMismatch =
+    voting.expectedPointsLength !== undefined &&
+    points.length !== Number(voting.expectedPointsLength);
 
   return (
     <div>
@@ -116,7 +124,7 @@ function VoteForm() {
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={maxPercent}
                   step={1}
                   value={weight}
                   onChange={(e) => setWeight(r, Number(e.target.value))}
@@ -132,18 +140,29 @@ function VoteForm() {
         })}
       </div>
 
-      <Button
-        app="fund"
-        variant="primary"
-        className="mt-6 w-full"
-        isLoading={tx.isBusy}
-        onClick={() => vote(points)}
-        {...(!anyAllocated || voting.hasVoted ? { disabled: true } : {})}
-      >
-        {voting.hasVoted ? "Already voted this cycle" : "Cast vote"}
-      </Button>
+      <div className="mt-6">
+        <ActionButton
+          isLoading={tx.isBusy}
+          disabled={
+            !anyAllocated || voting.hasVoted || noPower || lengthMismatch
+          }
+          onClick={() => vote(points)}
+        >
+          {voting.hasVoted ? "Already voted this cycle" : "Cast vote"}
+        </ActionButton>
+      </div>
 
-      {!anyAllocated && !voting.hasVoted && (
+      {!voting.hasVoted && noPower && (
+        <Caption className="text-system-warning mt-2 block text-center">
+          Your voting power is still accruing this cycle — try again shortly.
+        </Caption>
+      )}
+      {!voting.hasVoted && !noPower && lengthMismatch && (
+        <Caption className="text-system-warning mt-2 block text-center">
+          The recipient list just changed — refresh before voting.
+        </Caption>
+      )}
+      {!anyAllocated && !voting.hasVoted && !noPower && !lengthMismatch && (
         <Caption className="text-surface-grey mt-2 block text-center">
           Allocate weight to at least one recipient.
         </Caption>
@@ -159,8 +178,8 @@ function VoteForm() {
       <Body className="text-surface-grey mt-6 text-sm">
         Weights are relative — each recipient&apos;s share of the next
         distribution is proportional to its total weighted votes (your weight ×
-        your voting power, summed across all voters). Max {MAX_POINTS / 100n}%
-        per recipient.
+        your voting power, summed across all voters). Max{" "}
+        {voting.maxPoints / 100n}% per recipient.
       </Body>
     </div>
   );

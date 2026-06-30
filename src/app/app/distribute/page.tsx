@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { Body, Button, Caption } from "@breadcoop/ui";
+import { Body, Caption } from "@breadcoop/ui";
 import { CheckCircle, XCircle } from "@phosphor-icons/react";
 import { Card, PageHeader, StatCard } from "@/components/dapp/ui";
-import { ConnectGate } from "@/components/dapp/connect-gate";
+import { ActionButton } from "@/components/dapp/action-button";
 import { TxStatus } from "@/components/dapp/tx-status";
 import { useDistribute, useDistributionReady } from "@/hooks/use-distribution";
 import { useCycle } from "@/hooks/use-cycle";
@@ -21,9 +21,7 @@ export default function DistributePage() {
         title="Distribute"
         subtitle="Anyone can trigger a distribution once the cycle is ready. Accrued yield is split among recipients by their votes, and the cycle advances."
       />
-      <ConnectGate>
-        <Distribute />
-      </ConnectGate>
+      <Distribute />
     </div>
   );
 }
@@ -34,7 +32,8 @@ function Distribute() {
   const cycle = useCycle();
   const { recipients } = useRecipients();
   const voting = useVotingState();
-  const { yieldAccrued } = useTokenStats();
+  const tokenStats = useTokenStats();
+  const { yieldAccrued } = tokenStats;
 
   const totalVotes = useMemo(
     () => voting.distribution.reduce((a, b) => a + b, 0n),
@@ -48,16 +47,19 @@ function Distribute() {
     {
       label: "Yield has accrued",
       ok:
-        yieldAccrued !== undefined &&
-        yieldAccrued >= BigInt(Math.max(1, recipients.length)),
+        yieldAccrued !== undefined && yieldAccrued >= BigInt(recipients.length),
     },
   ];
+  // All shown gates green but the contract still says not-ready means the
+  // instance is mis-wired (cycle module not pointing at this manager).
+  const wiringIssue = !isReady && checks.every((c) => c.ok);
 
   useEffect(() => {
     if (tx.isSuccess) {
       refetchReady();
       cycle.refetch();
       voting.refetch();
+      tokenStats.refetch();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tx.isSuccess]);
@@ -105,16 +107,23 @@ function Distribute() {
           ))}
         </ul>
 
-        <Button
-          app="fund"
-          variant="primary"
-          className="mt-6 w-full"
-          isLoading={tx.isBusy}
-          onClick={() => distribute()}
-          {...(!isReady ? { disabled: true } : {})}
-        >
-          {isReady ? "Claim & distribute" : "Not ready to distribute"}
-        </Button>
+        {wiringIssue && (
+          <Caption className="text-system-warning mt-3 block">
+            All checks pass but the protocol still reports not ready — this
+            instance may be mis-wired (its cycle module isn&apos;t pointed at
+            this distribution manager).
+          </Caption>
+        )}
+
+        <div className="mt-6">
+          <ActionButton
+            isLoading={tx.isBusy}
+            disabled={!isReady}
+            onClick={() => distribute()}
+          >
+            {isReady ? "Claim & distribute" : "Not ready to distribute"}
+          </ActionButton>
+        </div>
 
         <TxStatus
           status={tx.status}

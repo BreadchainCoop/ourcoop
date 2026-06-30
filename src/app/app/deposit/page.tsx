@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Body, Button, Caption } from "@breadcoop/ui";
+import { Body, Caption } from "@breadcoop/ui";
 import { Card, PageHeader } from "@/components/dapp/ui";
-import { ConnectGate } from "@/components/dapp/connect-gate";
 import { AmountField } from "@/components/dapp/amount-field";
+import { ActionButton } from "@/components/dapp/action-button";
 import { TxStatus } from "@/components/dapp/tx-status";
 import { cn } from "@/lib/utils";
 import { formatAmount, parseAmount } from "@/lib/format";
@@ -24,9 +24,7 @@ export default function DepositPage() {
         title="Deposit"
         subtitle={`Stake xDAI to mint ${TOKEN_SYMBOL} 1:1. Your principal stays fully withdrawable — only the interest is distributed.`}
       />
-      <ConnectGate>
-        <DepositForm />
-      </ConnectGate>
+      <DepositForm />
     </div>
   );
 }
@@ -42,13 +40,21 @@ function DepositForm() {
   const { approve, ...approveTx } = useApproveWxdai();
 
   const parsed = parseAmount(amount);
-  const balance = mode === "native" ? native.data?.value : wxdai.balance;
+  // Native deposits pay gas in xDAI too, so reserve a little for gas — otherwise
+  // a MAX deposit sends the whole balance as value and can't fund the tx.
+  const GAS_RESERVE = 10n ** 16n; // ~0.01 xDAI
+  const rawBalance = mode === "native" ? native.data?.value : wxdai.balance;
+  const balance =
+    mode === "native" && rawBalance !== undefined
+      ? rawBalance > GAS_RESERVE
+        ? rawBalance - GAS_RESERVE
+        : 0n
+      : rawBalance;
   const overBalance =
     parsed !== null && balance !== undefined && parsed > balance;
   const needsApproval =
     mode === "wxdai" && parsed !== null && (wxdai.allowance ?? 0n) < parsed;
 
-  // Refresh balances after a confirmed deposit.
   useEffect(() => {
     if (depositTx.isSuccess) {
       void native.refetch();
@@ -68,7 +74,6 @@ function DepositForm() {
 
   return (
     <Card>
-      {/* Source toggle */}
       <div className="border-paper-2 mb-5 inline-flex rounded-xl border p-1">
         {(["native", "wxdai"] as const).map((m) => (
           <button
@@ -108,38 +113,24 @@ function DepositForm() {
       )}
 
       <div className="mt-6">
-        {needsApproval ? (
-          <Button
-            app="fund"
-            variant="primary"
-            className="w-full"
-            isLoading={approveTx.isBusy}
-            onClick={() => parsed && approve(parsed)}
-          >
-            Approve WXDAI
-          </Button>
-        ) : (
-          <Button
-            app="fund"
-            variant="primary"
-            className="w-full"
-            isLoading={depositTx.isBusy}
-            onClick={() => parsed && deposit({ amount: parsed, mode })}
-            withBorder={false}
-            {...(disabled ? { disabled: true } : {})}
-          >
-            Deposit
-          </Button>
-        )}
+        <ActionButton
+          isLoading={needsApproval ? approveTx.isBusy : depositTx.isBusy}
+          disabled={disabled}
+          onClick={() => {
+            if (!parsed) return;
+            if (needsApproval) approve(parsed);
+            else deposit({ amount: parsed, mode });
+          }}
+        >
+          {needsApproval ? "Approve WXDAI" : "Deposit"}
+        </ActionButton>
       </div>
 
       <TxStatus
-        status={
-          approveTx.status === "idle" ? depositTx.status : approveTx.status
-        }
-        hash={approveTx.hash ?? depositTx.hash}
-        error={depositTx.error ?? approveTx.error}
-        successLabel={depositTx.isSuccess ? "Deposit confirmed" : "Approved"}
+        status={needsApproval ? approveTx.status : depositTx.status}
+        hash={needsApproval ? approveTx.hash : depositTx.hash}
+        error={needsApproval ? approveTx.error : depositTx.error}
+        successLabel={needsApproval ? "Approved" : "Deposit confirmed"}
       />
 
       <Body className="text-surface-grey mt-6 text-sm">
