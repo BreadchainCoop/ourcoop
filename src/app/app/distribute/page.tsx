@@ -11,7 +11,7 @@ import { useCycle } from "@/hooks/use-cycle";
 import { useRecipients } from "@/hooks/use-recipients";
 import { useVotingState } from "@/hooks/use-voting";
 import { useInstanceToken, useTokenStats } from "@/hooks/use-token";
-import { formatAmount } from "@/lib/format";
+import { LiveYield } from "@/components/dapp/live-yield";
 
 export default function DistributePage() {
   return (
@@ -69,7 +69,7 @@ function Distribute() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <StatCard
           label="Accrued yield"
-          value={`${formatAmount(yieldAccrued)} ${symbol}`}
+          value={<LiveYield symbol={symbol} />}
           sub="To be distributed"
           accent
         />
