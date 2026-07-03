@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { Logo } from "@breadcoop/ui";
 import { cn } from "@/lib/utils";
 import { useRegistryOwner } from "@/hooks/use-recipients";
 import { InstanceSwitcher } from "@/components/dapp/instance-switcher";
@@ -37,53 +36,52 @@ const LINKS = [
   { href: "/app/deploy", label: "Deploy" },
 ];
 
-export function DappNav() {
-  const pathname = usePathname();
+function useNavLinks() {
   const { isAdmin } = useRegistryOwner();
-  const links = isAdmin
+  return isAdmin
     ? [
         ...LINKS,
         { href: "/app/recipients", label: "Recipients" },
         { href: "/app/admin", label: "Admin" },
       ]
     : LINKS;
+}
+
+function isActive(pathname: string, href: string) {
+  return href === "/app" ? pathname === "/app" : pathname.startsWith(href);
+}
+
+export function DappNav() {
+  const pathname = usePathname();
+  const links = useNavLinks();
 
   return (
     <header className="border-paper-2 bg-paper-main/80 sticky top-0 z-50 border-b backdrop-blur">
-      <nav className="section-container flex h-16 items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-2">
-          <Logo variant="square" color="orange" size={28} />
-          <span className="font-breadDisplay text-text-standard hidden text-lg font-bold sm:block">
-            Crowdstaking
-          </span>
-        </Link>
+      <nav className="section-container flex h-16 items-center gap-3">
+        {/* Left: the instance IS the brand (white-label) — its badge + name. */}
+        <InstanceSwitcher />
 
-        <div className="hidden items-center gap-1 md:flex">
-          {links.map((l) => {
-            const active =
-              l.href === "/app"
-                ? pathname === "/app"
-                : pathname.startsWith(l.href);
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={cn(
-                  "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-core-orange/10 text-core-orange"
-                    : "text-surface-grey-2 hover:text-text-standard",
-                )}
-              >
-                {l.label}
-              </Link>
-            );
-          })}
+        {/* Center: page navigation (lg+) */}
+        <div className="hidden flex-1 items-center justify-center gap-1 lg:flex">
+          {links.map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                isActive(pathname, l.href)
+                  ? "bg-core-orange/10 text-core-orange"
+                  : "text-surface-grey-2 hover:text-text-standard",
+              )}
+            >
+              {l.label}
+            </Link>
+          ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Right: utilities */}
+        <div className="ml-auto flex items-center gap-2 lg:ml-0">
           <DemoToggle />
-          <InstanceSwitcher />
           <ConnectButton
             showBalance={false}
             accountStatus="address"
@@ -92,28 +90,22 @@ export function DappNav() {
         </div>
       </nav>
 
-      {/* Mobile nav */}
-      <div className="border-paper-2 flex gap-1 overflow-x-auto border-t px-4 py-2 md:hidden">
-        {links.map((l) => {
-          const active =
-            l.href === "/app"
-              ? pathname === "/app"
-              : pathname.startsWith(l.href);
-          return (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap",
-                active
-                  ? "bg-core-orange/10 text-core-orange"
-                  : "text-surface-grey-2",
-              )}
-            >
-              {l.label}
-            </Link>
-          );
-        })}
+      {/* Compact nav row (below lg) */}
+      <div className="border-paper-2 flex gap-1 overflow-x-auto border-t px-4 py-2 lg:hidden">
+        {links.map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            className={cn(
+              "rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap",
+              isActive(pathname, l.href)
+                ? "bg-core-orange/10 text-core-orange"
+                : "text-surface-grey-2",
+            )}
+          >
+            {l.label}
+          </Link>
+        ))}
       </div>
     </header>
   );

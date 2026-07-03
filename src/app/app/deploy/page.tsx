@@ -14,9 +14,13 @@ import {
 import { Card, PageHeader } from "@/components/dapp/ui";
 import { ActionButton } from "@/components/dapp/action-button";
 import { TxStatus } from "@/components/dapp/tx-status";
+import { InstanceShareCard } from "@/components/dapp/instance-share-card";
+import { DurationInput } from "@/components/dapp/duration-input";
 import { useDeployInstance } from "@/hooks/use-deploy";
 import { useInstanceContext } from "@/components/instance-provider";
-import { shortenAddress } from "@/lib/format";
+import { durationToBlocks, shortenAddress } from "@/lib/format";
+import { instanceShareUrl } from "@/lib/instance";
+import { chainConfig } from "@/lib/chains";
 import { MAX_POINTS } from "@/lib/constants";
 import { isValidImageUri } from "@/lib/metadata";
 import { SafeImage } from "@/components/dapp/safe-image";
@@ -26,7 +30,7 @@ export default function DeployPage() {
     <div className="mx-auto max-w-lg">
       <PageHeader
         title="Deploy your instance"
-        subtitle="Launch a complete, self-owned Crowdstaking instance on Gnosis in one transaction. You become the admin of every contract."
+        subtitle="Launch a complete, self-owned staking instance in one transaction — on whichever supported chain your wallet is connected to. You become the admin of every contract."
       />
       <DeployForm />
     </div>
@@ -37,12 +41,22 @@ function DeployForm() {
   const { address } = useAccount();
   const router = useRouter();
   const { addInstance } = useInstanceContext();
-  const { deploy, instance, status, isBusy, isSuccess, error, hash } =
-    useDeployInstance();
+  const {
+    deploy,
+    instance,
+    chainId,
+    canDeploy: deployerAvailable,
+    status,
+    isBusy,
+    isSuccess,
+    error,
+    hash,
+  } = useDeployInstance();
+  const chain = chainConfig(chainId);
 
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
-  const [cycleLength, setCycleLength] = useState("17280");
+  const [cycleSeconds, setCycleSeconds] = useState(0);
   const [owner, setOwner] = useState("");
 
   const [advanced, setAdvanced] = useState(false);
@@ -62,10 +76,10 @@ function DeployForm() {
   const [expiryDays, setExpiryDays] = useState("7");
 
   const ownerValue = (owner.trim() || address || "") as string;
-  const cleanCycle = cycleLength.trim();
+  const cycleBlocks = durationToBlocks(cycleSeconds, chain.blockTimeSeconds);
   const cleanPoints = maxPoints.trim();
   const ownerValid = isAddress(ownerValue);
-  const cycleValid = /^\d+$/.test(cleanCycle) && BigInt(cleanCycle || "0") > 0n;
+  const cycleValid = cycleBlocks > 0n;
   const pointsValid =
     /^\d+$/.test(cleanPoints) && BigInt(cleanPoints || "0") > 0n;
 
@@ -85,6 +99,7 @@ function DeployForm() {
   const expiryValid = /^\d+$/.test(cleanExpiry) && Number(cleanExpiry) > 0;
 
   const canDeploy =
+    deployerAvailable &&
     name.trim().length > 0 &&
     symbol.trim().length > 0 &&
     cycleValid &&
@@ -103,12 +118,12 @@ function DeployForm() {
       ? keccak256(toHex(customSalt.trim()))
       : keccak256(
           toHex(
-            `${name.trim()}|${symbol.trim()}|${cleanCycle}|${ownerValue}|${crypto.randomUUID()}`,
+            `${name.trim()}|${symbol.trim()}|${cycleBlocks}|${ownerValue}|${crypto.randomUUID()}`,
           ),
         );
     void deploy({
       owner: ownerValue as Address,
-      cycleLength: BigInt(cleanCycle),
+      cycleLength: cycleBlocks,
       tokenName: name.trim(),
       tokenSymbol: symbol.trim(),
       maxVotingPoints: BigInt(cleanPoints),
@@ -128,47 +143,75 @@ function DeployForm() {
         <p className="text-system-green flex items-center gap-2">
           <CheckCircle size={22} weight="fill" />
           <span className="font-breadDisplay text-lg font-bold">
-            Instance deployed!
+            Your instance is live!
           </span>
         </p>
-        <dl className="mt-4 space-y-2">
-          {(
-            [
-              ["Token", instance.token],
-              ["Distribution Manager", instance.distributionManager],
-              ["Cycle Module", instance.cycleModule],
-              ["Voting Module", instance.votingModule],
-              ["Recipient Registry", instance.recipientRegistry],
-              ["Distribution Strategy", instance.distributionStrategy],
-              ["Voting Power Strategy", instance.votingPowerStrategy],
-            ] as const
-          ).map(([label, addr]) => (
-            <div
-              key={label}
-              className="border-paper-2 flex items-center justify-between border-t pt-2"
-            >
-              <Caption className="text-surface-grey">{label}</Caption>
-              <span className="text-text-standard font-mono text-sm">
-                {shortenAddress(addr, 6)}
-              </span>
-            </div>
-          ))}
-        </dl>
+        <Body className="text-surface-grey-2 mt-1 text-sm">
+          Send the link below to your community — it opens straight into this
+          instance, ready to deposit, vote, and watch the yield grow.
+        </Body>
+
+        {/* The whole point: a standalone, shareable page for this instance. */}
+        <div className="mt-4">
+          <InstanceShareCard
+            distributionManager={instance.distributionManager}
+            chainId={chainId}
+          />
+        </div>
+
         <Button
           app="fund"
           variant="primary"
-          className="mt-6 w-full"
+          className="mt-4 w-full"
           rightIcon={<ArrowRight weight="bold" />}
           onClick={() => {
             addInstance({
               label: symbol.trim() || "New instance",
+              chainId,
               addresses: instance,
             });
-            router.push("/app");
+            router.push(
+              instanceShareUrl(instance.distributionManager, chainId),
+            );
           }}
         >
           Use this instance
         </Button>
+
+        {/* Contract addresses — secondary, tucked away behind a disclosure. */}
+        <details className="group mt-6">
+          <summary className="text-surface-grey-2 hover:text-text-standard flex cursor-pointer items-center gap-1 text-sm font-medium select-none">
+            <CaretRight
+              size={14}
+              weight="bold"
+              className="transition-transform group-open:rotate-90"
+            />
+            Contract addresses
+          </summary>
+          <dl className="mt-3 space-y-2">
+            {(
+              [
+                ["Token", instance.token],
+                ["Distribution Manager", instance.distributionManager],
+                ["Cycle Module", instance.cycleModule],
+                ["Voting Module", instance.votingModule],
+                ["Recipient Registry", instance.recipientRegistry],
+                ["Distribution Strategy", instance.distributionStrategy],
+                ["Voting Power Strategy", instance.votingPowerStrategy],
+              ] as const
+            ).map(([label, addr]) => (
+              <div
+                key={label}
+                className="border-paper-2 flex items-center justify-between border-t pt-2"
+              >
+                <Caption className="text-surface-grey">{label}</Caption>
+                <span className="text-text-standard font-mono text-sm">
+                  {shortenAddress(addr, 6)}
+                </span>
+              </div>
+            ))}
+          </dl>
+        </details>
       </Card>
     );
   }
@@ -185,16 +228,19 @@ function DeployForm() {
       <Field label="Token symbol">
         <Input value={symbol} onChange={setSymbol} placeholder="ACME" />
       </Field>
-      <Field label="Cycle length (blocks, ~5s each on Gnosis)">
-        <Input
-          value={cycleLength}
-          onChange={setCycleLength}
-          placeholder="17280"
-        />
-        {!cycleValid && cycleLength !== "" && (
-          <Caption className="text-system-red mt-1 block">
-            Must be a positive integer.
+      <Field label="Cycle length">
+        <DurationInput onChange={setCycleSeconds} />
+        {cycleValid ? (
+          <Caption className="text-surface-grey mt-1 block">
+            ≈ {cycleBlocks.toString()} blocks on {chain.chain.name} (
+            {chain.blockTimeSeconds}s/block).
           </Caption>
+        ) : (
+          cycleSeconds > 0 && (
+            <Caption className="text-system-red mt-1 block">
+              Enter a positive duration.
+            </Caption>
+          )
         )}
       </Field>
       <Field label="Owner / admin (defaults to you)">
@@ -312,6 +358,13 @@ function DeployForm() {
             </Caption>
           </Field>
         </div>
+      )}
+
+      {!deployerAvailable && (
+        <Caption className="text-system-warning mt-4 block">
+          Deploys aren&apos;t available on {chain.chain.name} yet — switch your
+          wallet to a supported chain (currently Gnosis).
+        </Caption>
       )}
 
       <div className="mt-2">

@@ -46,6 +46,20 @@ default in `src/lib/constants.ts` (override with `NEXT_PUBLIC_*` env vars):
 Deploy your own instance with `contracts/script/DeployGnosis.s.sol` (see the env
 vars documented at the top of that script).
 
+## Every instance gets its own page
+
+The dapp is one static bundle that resolves any instance client-side, so every
+deployed instance has a standalone shareable link:
+
+```
+https://<host>/app/?i=<distributionManager>
+```
+
+Opening it resolves the instance on-chain (wiring + artwork + governance kind)
+and boots straight into it — no registry, no backend. The page white-labels to
+that instance (its banner + ticker), and the deploy-success screen shows a
+copyable link plus a QR code.
+
 ## Releases
 
 Contracts are released independently — see [GitHub Releases](https://github.com/BreadchainCoop/crowdstake.fun/releases) (latest: `v0.0.2`).
