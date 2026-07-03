@@ -122,14 +122,19 @@ export const CHAINS: Record<number, ChainConfig> = {
       process.env.NEXT_PUBLIC_RPC_URL_42161,
       "https://arb1.arbitrum.io/rpc",
     ),
-    deployer: orNull(process.env.NEXT_PUBLIC_DEPLOYER_42161) as Address | null,
+    // Live deployer (see contracts/deployments/l2-deployers.json); the runtime
+    // address manifest supersedes this fallback on redeploys.
+    deployer: or(
+      process.env.NEXT_PUBLIC_DEPLOYER_42161,
+      "0x976724aC0d83dC3624920f720b91B1Aa5691E28A",
+    ) as Address,
     defaultInstance: null,
     wrappedToken: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as Address, // native USDC
     wrappedSymbol: "USDC",
     yieldKind: "stable",
     blockTimeSeconds: 12, // block.number follows the L1 cadence on Arbitrum
     explorer: "https://arbiscan.io",
-    deployable: !!process.env.NEXT_PUBLIC_DEPLOYER_42161,
+    deployable: true,
   },
   [optimism.id]: {
     chain: optimism,
@@ -137,14 +142,19 @@ export const CHAINS: Record<number, ChainConfig> = {
       process.env.NEXT_PUBLIC_RPC_URL_10,
       "https://mainnet.optimism.io",
     ),
-    deployer: orNull(process.env.NEXT_PUBLIC_DEPLOYER_10) as Address | null,
+    // Live deployer (see contracts/deployments/l2-deployers.json); the runtime
+    // address manifest supersedes this fallback on redeploys.
+    deployer: or(
+      process.env.NEXT_PUBLIC_DEPLOYER_10,
+      "0x86054D9d62Fd33FcC30731FCC31A556259810ec2",
+    ) as Address,
     defaultInstance: null,
     wrappedToken: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85" as Address, // native USDC
     wrappedSymbol: "USDC",
     yieldKind: "stable",
     blockTimeSeconds: 2,
     explorer: "https://optimistic.etherscan.io",
-    deployable: !!process.env.NEXT_PUBLIC_DEPLOYER_10,
+    deployable: true,
   },
   [mainnet.id]: {
     chain: mainnet,
@@ -160,6 +170,39 @@ export const CHAINS: Record<number, ChainConfig> = {
     blockTimeSeconds: 12,
     explorer: "https://etherscan.io",
     deployable: !!process.env.NEXT_PUBLIC_DEPLOYER_1,
+  },
+};
+
+/**
+ * Which address fields were pinned at BUILD time via NEXT_PUBLIC_* env vars.
+ * The runtime address manifest (src/lib/remote-addresses.ts, fetched from the
+ * rolling `contract-addresses` GitHub release) must never override a pinned
+ * field — e.g. the e2e fork harness bakes its own deployer + instance and must
+ * not be clobbered by mainnet addresses. Production builds leave these unset
+ * so the latest release always wins.
+ */
+export const ENV_PINNED: Record<
+  number,
+  { deployer: boolean; instance: boolean }
+> = {
+  [gnosis.id]: {
+    deployer: !!orNull(process.env.NEXT_PUBLIC_DEPLOYER_ADDRESS),
+    instance: !!(
+      orNull(process.env.NEXT_PUBLIC_TOKEN_ADDRESS) ||
+      orNull(process.env.NEXT_PUBLIC_DISTRIBUTION_MANAGER_ADDRESS)
+    ),
+  },
+  [arbitrum.id]: {
+    deployer: !!orNull(process.env.NEXT_PUBLIC_DEPLOYER_42161),
+    instance: false,
+  },
+  [optimism.id]: {
+    deployer: !!orNull(process.env.NEXT_PUBLIC_DEPLOYER_10),
+    instance: false,
+  },
+  [mainnet.id]: {
+    deployer: !!orNull(process.env.NEXT_PUBLIC_DEPLOYER_1),
+    instance: false,
   },
 };
 
