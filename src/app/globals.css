@@ -78,3 +78,163 @@ body {
 .animate-nudge {
   animation: nudge 1.4s ease-in-out infinite;
 }
+
+/* --- "How it Works" step illustrations (looping, purely decorative) ------ */
+
+/* Coins dropping from members into the community pool. */
+@keyframes hiw-coin-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.8);
+  }
+  18% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(30px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(32px) scale(0.9);
+  }
+}
+.hiw-coin {
+  animation: hiw-coin-drop 2.6s ease-in infinite;
+}
+
+/* The pool level gently rising as deposits land. */
+@keyframes hiw-pool-fill {
+  0%,
+  100% {
+    height: 46%;
+  }
+  50% {
+    height: 72%;
+  }
+}
+.hiw-pool-fill {
+  animation: hiw-pool-fill 3.4s ease-in-out infinite;
+}
+
+/* The yield layer growing on top of an untouched principal. */
+@keyframes hiw-yield-grow {
+  0%,
+  100% {
+    height: 22%;
+  }
+  50% {
+    height: 46%;
+  }
+}
+.hiw-yield-grow {
+  animation: hiw-yield-grow 3s ease-in-out infinite;
+}
+
+/* A badge rising to hint at accruing interest. */
+@keyframes hiw-rise {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+.hiw-rise {
+  animation: hiw-rise 2.4s ease-in-out infinite;
+}
+
+/* Vote-allocation bars tallying up. */
+@keyframes hiw-bar {
+  0% {
+    transform: scaleX(0);
+  }
+  55%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+.hiw-bar {
+  animation: hiw-bar 3.2s ease-in-out infinite;
+}
+
+/* Yield streaming out to funded recipients. */
+@keyframes hiw-flow {
+  0% {
+    opacity: 0;
+    transform: translate(0, -50%);
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+    transform: translate(48px, -50%);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(56px, -50%);
+  }
+}
+.hiw-flow {
+  animation: hiw-flow 1.9s ease-in-out infinite;
+}
+
+/* Recipient tiles lighting up as they receive funds. */
+@keyframes hiw-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+.hiw-pulse {
+  animation: hiw-pulse 1.9s ease-in-out infinite;
+}
+
+/* Collateral / loan columns filling upward (origin set via `origin-bottom`). */
+@keyframes hiw-grow-y {
+  0% {
+    transform: scaleY(0);
+  }
+  55%,
+  100% {
+    transform: scaleY(1);
+  }
+}
+.hiw-grow-y {
+  animation: hiw-grow-y 3s ease-in-out infinite;
+}
+
+/* Collateral value fluctuating with the market — but staying above the loan. */
+@keyframes hiw-dip {
+  0%,
+  100% {
+    height: 82%;
+  }
+  50% {
+    height: 60%;
+  }
+}
+.hiw-dip {
+  animation: hiw-dip 3.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hiw-coin,
+  .hiw-pool-fill,
+  .hiw-yield-grow,
+  .hiw-rise,
+  .hiw-bar,
+  .hiw-flow,
+  .hiw-pulse,
+  .hiw-grow-y,
+  .hiw-dip {
+    animation: none !important;
+  }
+}
