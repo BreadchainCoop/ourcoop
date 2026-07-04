@@ -18,7 +18,9 @@ import {
   Target,
   TrendUp,
 } from "@phosphor-icons/react/dist/ssr";
+import { HowItWorks } from "@/components/_home/how-it-works";
 import { InterestCalculator } from "@/components/_home/interest-calculator";
+import { YieldEngine } from "@/components/_home/yield-engine";
 import { YieldSliceExplainer } from "@/components/_home/yield-slice-explainer";
 
 const DOCS_URL = "/docs"; // in-app documentation & walkthroughs
@@ -35,6 +37,7 @@ export function LandingPage() {
         <UnderTheHood />
         <YieldSliceExplainer />
         <HowItWorks />
+        <YieldEngine />
         <GetStarted />
         <CtaBand />
       </main>
@@ -268,52 +271,6 @@ function UnderTheHood() {
           collateralized xDAI. All interest earned on the sDAI funds their
           shared goal.
         </Body>
-      </div>
-    </section>
-  );
-}
-
-/* ------------------------------ How it Works ----------------------------- */
-
-const STEPS = [
-  {
-    title: "Community pools assets",
-    body: "Members deposit funds to the shared community pool in your own branded interface.",
-  },
-  {
-    title: "Automated interest generation",
-    body: "Funds are automatically generating yield through overcollateralized loans.",
-  },
-  {
-    title: "Community decides on funding",
-    body: "Interest is allocated to your community's shared goal.",
-  },
-  {
-    title: "Projects get funded",
-    body: "Projects receive funding while members retain their original principal amount.",
-  },
-];
-
-function HowItWorks() {
-  return (
-    <section id="how-it-works" className="py-20">
-      <div className="section-container">
-        <Heading2 className="text-text-standard text-center">
-          Fundraising for free: from shared funds to shared futures
-        </Heading2>
-        <ol className="mx-auto mt-12 max-w-2xl space-y-8">
-          {STEPS.map((step, i) => (
-            <li key={step.title} className="flex gap-5">
-              <span className="bg-core-orange font-breadDisplay flex h-10 w-10 flex-none items-center justify-center rounded-full font-bold text-white">
-                {i + 1}
-              </span>
-              <div>
-                <Heading4 className="text-text-standard">{step.title}</Heading4>
-                <Body className="text-surface-grey-2 mt-1">{step.body}</Body>
-              </div>
-            </li>
-          ))}
-        </ol>
       </div>
     </section>
   );
