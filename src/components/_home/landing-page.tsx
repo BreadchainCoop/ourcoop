@@ -18,8 +18,8 @@ import {
   Target,
   TrendUp,
 } from "@phosphor-icons/react/dist/ssr";
+import { FundingCalculator } from "@/components/_home/funding-calculator";
 import { HowItWorks } from "@/components/_home/how-it-works";
-import { InterestCalculator } from "@/components/_home/interest-calculator";
 import { YieldEngine } from "@/components/_home/yield-engine";
 import { YieldSliceExplainer } from "@/components/_home/yield-slice-explainer";
 
@@ -146,7 +146,7 @@ function Hero() {
         </ul>
       </div>
       <div className="flex items-center">
-        <InterestCalculator />
+        <FundingCalculator />
       </div>
     </section>
   );
