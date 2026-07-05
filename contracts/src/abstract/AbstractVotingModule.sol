@@ -28,6 +28,9 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
     /// @notice EIP-712 domain version for signature verification
     string private constant EIP712_VERSION = "1";
 
+    /// @notice EIP-712 domain version for cross-chain (family) signature verification
+    string private constant CROSS_CHAIN_EIP712_VERSION = "2";
+
     /// @notice Precision factor for calculations to avoid rounding errors
     /// @dev Used in vote weight calculations to maintain precision
     uint256 public constant PRECISION = 1e18;
@@ -40,6 +43,17 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
     /// @dev Keccak256 hash of the Vote type structure for EIP-712 signing
     /// @dev keccak256("Vote(address voter,bytes32 pointsHash,uint256 nonce)") = 0x75bc59ee506a0b0e949fb3a7df4ed9c67afe07055fed85f523f130ba4f0bfaea
     bytes32 public constant VOTE_TYPEHASH = keccak256("Vote(address voter,bytes32 pointsHash,uint256 nonce)");
+
+    /// @notice EIP-712 typehash for cross-chain vote signature verification
+    /// @dev Pinned for frontend/relay parity — do NOT change without updating both.
+    bytes32 public constant CROSS_CHAIN_VOTE_TYPEHASH =
+        keccak256("CrossChainVote(address voter,uint256[] points,address[] recipients,uint256 nonce,uint256 deadline)");
+
+    /// @notice EIP-712 domain typehash for the chain-agnostic family domain
+    /// @dev name + version + salt only — deliberately NO chainId/verifyingContract, so one
+    ///      signature is valid on every instance sharing the same familyId.
+    bytes32 private constant CROSS_CHAIN_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,bytes32 salt)");
 
     // ============ EIP-7201 Namespaced Storage ============
 
@@ -66,6 +80,12 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
         /// @notice Reference to the cycle module for cycle management
         /// @dev Manages voting cycles and transitions between periods
         ICycleModule cycleModule;
+        /// @notice Cross-chain family identity; 0 = classic chain-bound instance
+        /// @dev Salts the chain-agnostic EIP-712 domain shared by all family siblings
+        bytes32 familyId;
+        /// @notice Highest cross-chain nonce accepted per voter (family path only)
+        /// @dev Monotonic — a superseded signature is dead forever on this chain
+        mapping(address => uint256) lastCrossChainNonce;
     }
 
     // keccak256(abi.encode(uint256(keccak256("crowdstake.storage.AbstractVotingModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -123,12 +143,21 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
         return _getAbstractVotingModuleStorage().cycleModule;
     }
 
+    /// @notice Returns the cross-chain family identity (0 = classic chain-bound instance)
+    function familyId() public view returns (bytes32) {
+        return _getAbstractVotingModuleStorage().familyId;
+    }
+
+    /// @notice Returns the highest cross-chain nonce accepted for a voter
+    /// @param voter The voter address
+    function lastCrossChainNonce(address voter) public view returns (uint256) {
+        return _getAbstractVotingModuleStorage().lastCrossChainNonce[voter];
+    }
+
     // ============ Initialization ============
 
-    /// @notice Initializes the abstract voting module
-    /// @dev Sets up EIP-712 domain, ownership, and core parameters.
-    ///      Must be called by inheriting contract's initializer.
-    ///      Derives recipientRegistry and cycleModule from the distribution module.
+    /// @notice Initializes the abstract voting module as a classic chain-bound instance
+    /// @dev Back-compat overload: familyId = 0 (cross-chain path disabled).
     /// @param _strategies Array of voting power strategy contracts
     /// @param _distributionModule Address of the distribution module
     /// @param _owner Address that will own this contract (receives onlyOwner privileges)
@@ -137,6 +166,24 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
         IVotingPowerStrategy[] calldata _strategies,
         address _distributionModule,
         address _owner
+    ) internal onlyInitializing {
+        __AbstractVotingModule_init(_strategies, _distributionModule, _owner, bytes32(0));
+    }
+
+    /// @notice Initializes the abstract voting module
+    /// @dev Sets up EIP-712 domain, ownership, and core parameters.
+    ///      Must be called by inheriting contract's initializer.
+    ///      Derives recipientRegistry and cycleModule from the distribution module.
+    /// @param _strategies Array of voting power strategy contracts
+    /// @param _distributionModule Address of the distribution module
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
+    /// @param _familyId Cross-chain family identity (0 = classic chain-bound instance)
+    // solhint-disable-next-line func-name-mixedcase
+    function __AbstractVotingModule_init(
+        IVotingPowerStrategy[] calldata _strategies,
+        address _distributionModule,
+        address _owner,
+        bytes32 _familyId
     ) internal onlyInitializing {
         if (_strategies.length == 0) revert NoStrategiesProvided();
 
@@ -156,6 +203,7 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
         $.distributionModule = distModule;
         $.recipientRegistry = _recipientRegistry;
         $.cycleModule = _cycleModule;
+        $.familyId = _familyId;
 
         for (uint256 i = 0; i < _strategies.length; i++) {
             if (address(_strategies[i]) == address(0)) revert InvalidStrategy();
@@ -179,10 +227,92 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
     }
 
     /// @notice Returns the EIP-712 domain separator for signature verification
-    /// @dev Used by external contracts to verify signatures
+    /// @dev Family instances (familyId != 0) report the chain-agnostic family domain —
+    ///      kept in lockstep with eip712Domain() so wallets/tooling see one consistent domain.
     /// @return The domain separator hash
     function DOMAIN_SEPARATOR() external view virtual returns (bytes32) {
+        if (_getAbstractVotingModuleStorage().familyId != 0) return crossChainDomainSeparator();
         return _domainSeparatorV4();
+    }
+
+    /// @notice Returns the chain-agnostic EIP-712 domain separator for the cross-chain vote path
+    /// @dev keccak256(CROSS_CHAIN_DOMAIN_TYPEHASH, name, version, salt = familyId) —
+    ///      identical on every chain, which is what makes one signature family-wide.
+    function crossChainDomainSeparator() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                CROSS_CHAIN_DOMAIN_TYPEHASH,
+                keccak256(bytes(EIP712_NAME)),
+                keccak256(bytes(CROSS_CHAIN_EIP712_VERSION)),
+                _getAbstractVotingModuleStorage().familyId
+            )
+        );
+    }
+
+    /// @inheritdoc EIP712Upgradeable
+    /// @dev Family instances (familyId != 0) report the chain-agnostic family domain:
+    ///      fields = 0x13 (name | version | salt), no chainId/verifyingContract.
+    function eip712Domain()
+        public
+        view
+        virtual
+        override
+        returns (
+            bytes1 fields,
+            string memory name,
+            string memory version,
+            uint256 chainId,
+            address verifyingContract,
+            bytes32 salt,
+            uint256[] memory extensions
+        )
+    {
+        bytes32 _familyId = _getAbstractVotingModuleStorage().familyId;
+        if (_familyId != 0) {
+            return (hex"13", EIP712_NAME, CROSS_CHAIN_EIP712_VERSION, 0, address(0), _familyId, new uint256[](0));
+        }
+        return super.eip712Domain();
+    }
+
+    /// @notice Hash of the local recipient set — a cheap cross-chain membership-drift probe
+    /// @dev keccak256(abi.encodePacked(registry.getRecipients())); encodePacked pads array
+    ///      elements to 32 bytes, so this equals the EIP-712 address[] encoding.
+    function recipientsHash() external view returns (bytes32) {
+        AbstractVotingModuleStorage storage $ = _getAbstractVotingModuleStorage();
+        if (address($.recipientRegistry) == address(0)) revert RecipientRegistryNotSet();
+        return keccak256(abi.encodePacked($.recipientRegistry.getRecipients()));
+    }
+
+    /// @notice Validates a cross-chain vote signature against the family domain
+    /// @dev digest = keccak256(0x1901 || crossChainDomainSeparator() || structHash) — built
+    ///      explicitly; the OZ chain-bound domain is never used for family digests.
+    /// @param voter The address of the voter
+    /// @param points Points per signed recipient (parallel to `recipients`)
+    /// @param recipients The recipient set the voter signed over (signing chain's order)
+    /// @param nonce Monotonic cross-chain nonce
+    /// @param deadline Unix timestamp after which the signature is invalid
+    /// @param signature The EIP-712 signature to validate
+    /// @return True if the signature recovers to the voter, false otherwise
+    function validateCrossChainSignature(
+        address voter,
+        uint256[] calldata points,
+        address[] calldata recipients,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) public view returns (bool) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                CROSS_CHAIN_VOTE_TYPEHASH,
+                voter,
+                keccak256(abi.encodePacked(points)),
+                keccak256(abi.encodePacked(recipients)),
+                nonce,
+                deadline
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked(hex"1901", crossChainDomainSeparator(), structHash));
+        return digest.recover(signature) == voter;
     }
 
     /// @notice Checks if a nonce has been used for a voter
@@ -322,10 +452,12 @@ abstract contract AbstractVotingModule is IVotingModule, Initializable, EIP712Up
 
     /// @notice Processes and records a vote
     /// @dev Updates project distributions and cycle voting power. Handles vote recasting.
+    ///      Takes memory so the cross-chain path can pass reordered (local) points;
+    ///      calldata arrays auto-convert.
     /// @param voter Address of the voter
     /// @param points Array of points allocated to each recipient
     /// @param votingPower Total voting power of the voter
-    function _processVote(address voter, uint256[] calldata points, uint256 votingPower) internal virtual;
+    function _processVote(address voter, uint256[] memory points, uint256 votingPower) internal virtual;
 
     /// @notice Processes a vote with additional data for downstream implementations
     /// @dev Called by _castSingleVoteWithParams. Default impl calls _processVote then

@@ -89,7 +89,8 @@ contract CrowdStakeDeployerTest is Test {
             proposalExpiry: 0,
             distributionKind: 0, // proportional
             tokenImageURI: "",
-            bannerImageURI: ""
+            bannerImageURI: "",
+            crossChain: false
         });
     }
 
@@ -110,7 +111,8 @@ contract CrowdStakeDeployerTest is Test {
             proposalExpiry: expiry,
             distributionKind: 0, // proportional
             tokenImageURI: "",
-            bannerImageURI: ""
+            bannerImageURI: "",
+            crossChain: false
         });
     }
 
@@ -238,6 +240,105 @@ contract CrowdStakeDeployerTest is Test {
         CrowdStakeDeployer.Params memory p = _adminParams("z");
         p.owner = address(0);
         vm.expectRevert(CrowdStakeDeployer.ZeroOwner.selector);
+        deployer.deploy(p);
+    }
+
+    // ---- Cross-chain family ----
+
+    /// @dev familyIdOf must exactly mirror the pure derivation (protocol tag + config commit).
+    function test_FamilyIdOf_MirrorsDerivation() public view {
+        CrowdStakeDeployer.Params memory p = _adminParams("fam-id");
+        bytes32 expected = keccak256(
+            abi.encode(
+                keccak256("crowdstake.family.v2"),
+                FOUNDER,
+                p.salt,
+                keccak256(bytes(p.tokenName)),
+                keccak256(bytes(p.tokenSymbol)),
+                p.maxVotingPoints,
+                p.registryKind,
+                p.distributionKind
+            )
+        );
+        assertEq(
+            deployer.familyIdOf(
+                FOUNDER, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
+            ),
+            expected,
+            "familyIdOf derivation"
+        );
+
+        // Config-committing: a different symbol yields a different family (no accidental merge).
+        assertTrue(
+            deployer.familyIdOf(
+                FOUNDER, p.salt, p.tokenName, "OTHER", p.maxVotingPoints, p.registryKind, p.distributionKind
+            ) != expected,
+            "symbol change -> different family"
+        );
+        // Creator-scoped: a different creator yields a different family.
+        assertTrue(
+            deployer.familyIdOf(
+                OWNER, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
+            ) != expected,
+            "creator change -> different family"
+        );
+    }
+
+    /// @dev A cross-chain deploy wires the familyId into the voting module, records the sibling,
+    ///      and emits FamilyDeployed alongside SystemDeployed.
+    function test_CrossChainDeploy_WiresFamilyAndRecordsSibling() public {
+        CrowdStakeDeployer.Params memory p = _adminParams("fam-1");
+        p.crossChain = true;
+
+        bytes32 familyId = deployer.familyIdOf(
+            FOUNDER, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
+        );
+
+        vm.expectEmit(true, true, true, false);
+        emit CrowdStakeDeployer.FamilyDeployed(familyId, FOUNDER, OWNER);
+        vm.prank(FOUNDER);
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        // The voting module knows its family and gates on castCrossChainVote.
+        assertEq(BasisPointsVotingModule(i.votingModule).familyId(), familyId, "familyId wired into module");
+
+        // familyInstances round-trip returns the full 8-address tuple.
+        (
+            address cycleModule,
+            address registry,
+            address token,
+            address votingPowerStrategy,
+            address distributionManager,
+            address distributionStrategy,
+            address secondaryDistributionStrategy,
+            address votingModule
+        ) = deployer.familyInstances(familyId);
+        assertEq(cycleModule, i.cycleModule, "sibling cycleModule");
+        assertEq(registry, i.registry, "sibling registry");
+        assertEq(token, i.token, "sibling token");
+        assertEq(votingPowerStrategy, i.votingPowerStrategy, "sibling votingPowerStrategy");
+        assertEq(distributionManager, i.distributionManager, "sibling distributionManager");
+        assertEq(distributionStrategy, i.distributionStrategy, "sibling distributionStrategy");
+        assertEq(secondaryDistributionStrategy, i.secondaryDistributionStrategy, "sibling secondary");
+        assertEq(votingModule, i.votingModule, "sibling votingModule");
+    }
+
+    /// @dev A classic deploy leaves familyInstances empty and the module familyId zero.
+    function test_ClassicDeploy_LeavesFamilyUnset() public {
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(_adminParams("classic-fam"));
+        assertEq(BasisPointsVotingModule(i.votingModule).familyId(), bytes32(0), "classic module familyId 0");
+    }
+
+    /// @dev The same creator+config can only seed a family once per chain.
+    function test_RevertWhen_FamilyAlreadyDeployed() public {
+        CrowdStakeDeployer.Params memory p = _adminParams("fam-dup");
+        p.crossChain = true;
+
+        vm.prank(FOUNDER);
+        deployer.deploy(p);
+
+        vm.prank(FOUNDER);
+        vm.expectRevert(CrowdStakeDeployer.FamilyAlreadyDeployed.selector);
         deployer.deploy(p);
     }
 }

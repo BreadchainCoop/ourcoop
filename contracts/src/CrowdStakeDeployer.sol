@@ -5,7 +5,6 @@ import {AbstractCycleModule} from "./abstract/AbstractCycleModule.sol";
 import {BaseDistributionManager} from "./base/BaseDistributionManager.sol";
 import {MultiStrategyDistributionManager} from "./base/MultiStrategyDistributionManager.sol";
 import {AbstractDistributionManager} from "./abstract/AbstractDistributionManager.sol";
-import {BasisPointsVotingModule} from "./base/BasisPointsVotingModule.sol";
 import {VotingDistributionStrategy} from "./implementation/strategies/VotingDistributionStrategy.sol";
 import {EqualDistributionStrategy} from "./implementation/strategies/EqualDistributionStrategy.sol";
 import {AdminRecipientRegistry} from "./implementation/registries/AdminRecipientRegistry.sol";
@@ -34,6 +33,9 @@ interface ICrowdStakeFactory {
 ///         written to the distribution manager (the app's canonical per-instance key) in the
 ///         same tx. Reuses one CrowdStakeFactory + its allowlisted beacons.
 contract CrowdStakeDeployer {
+    /// @notice Protocol tag mixed into every familyId — prevents cross-protocol collisions.
+    bytes32 private constant FAMILY_TAG = keccak256("crowdstake.family.v2");
+
     ICrowdStakeFactory public immutable FACTORY;
     address public immutable CYCLE_BEACON;
     address public immutable REGISTRY_BEACON; // AdminRecipientRegistry
@@ -81,6 +83,9 @@ contract CrowdStakeDeployer {
         // Instance artwork (off-chain URIs: ipfs/https/data). Empty = none.
         string tokenImageURI;
         string bannerImageURI;
+        // Cross-chain family: true = this instance joins the familyIdOf(...) family and its
+        // voting module accepts ONLY chain-agnostic castCrossChainVote ballots.
+        bool crossChain;
     }
 
     struct Instance {
@@ -100,9 +105,18 @@ contract CrowdStakeDeployer {
     error InvalidDistributionKind();
     error EmptyInitialRecipients();
     error ZeroProposalExpiry();
+    error FamilyAlreadyDeployed();
 
     /// @notice Emitted once a full instance is deployed and handed to its owner.
     event SystemDeployed(address indexed owner, address indexed deployer, bytes32 indexed salt, Instance instance);
+
+    /// @notice Emitted when a cross-chain family instance is deployed on this chain.
+    event FamilyDeployed(bytes32 indexed familyId, address indexed creator, address indexed owner);
+
+    /// @notice The family instance deployed on this chain, by familyId (zero addresses = none).
+    /// @dev The public getter returns the full 8-address tuple, so ONE eth_call per chain
+    ///      resolves a sibling completely.
+    mapping(bytes32 => Instance) public familyInstances;
 
     constructor(
         address factory,
@@ -128,6 +142,33 @@ contract CrowdStakeDeployer {
         VOTING_BEACON = votingBeacon;
     }
 
+    /// @notice The deterministic identity a deploy(p) with p.crossChain would create/extend.
+    /// @dev Creator-scoped (only the same wallet can extend its family), protocol-tagged, and
+    ///      config-committing: a different name/symbol/maxPoints/registryKind/distributionKind
+    ///      can NEVER merge into one family.
+    function familyIdOf(
+        address creator,
+        bytes32 salt,
+        string memory tokenName,
+        string memory tokenSymbol,
+        uint256 maxVotingPoints,
+        uint8 registryKind,
+        uint8 distributionKind
+    ) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                FAMILY_TAG,
+                creator,
+                salt,
+                keccak256(bytes(tokenName)),
+                keccak256(bytes(tokenSymbol)),
+                maxVotingPoints,
+                registryKind,
+                distributionKind
+            )
+        );
+    }
+
     /// @notice Deploy a full, working CrowdStake instance in one transaction.
     function deploy(Params calldata p) external returns (Instance memory inst) {
         if (p.owner == address(0)) revert ZeroOwner();
@@ -139,6 +180,14 @@ contract CrowdStakeDeployer {
             // the registry's initialize (which would abort the whole one-tx deploy).
             if (p.initialRecipients.length == 0) revert EmptyInitialRecipients();
             if (p.proposalExpiry == 0) revert ZeroProposalExpiry();
+        }
+
+        bytes32 familyId;
+        if (p.crossChain) {
+            familyId = familyIdOf(
+                msg.sender, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
+            );
+            if (familyInstances[familyId].votingModule != address(0)) revert FamilyAlreadyDeployed();
         }
 
         bytes32 baseSalt = keccak256(abi.encodePacked(p.salt, msg.sender));
@@ -186,13 +235,19 @@ contract CrowdStakeDeployer {
             _deployMulti(inst, baseSalt, self, p.owner, p.distributionKind == uint8(DistributionKind.Split));
         }
 
-        // 7. Voting module.
+        // 7. Voting module (familyId = 0 → classic chain-bound instance).
+        //    encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
         IVotingPowerStrategy[] memory vps = new IVotingPowerStrategy[](1);
         vps[0] = IVotingPowerStrategy(inst.votingPowerStrategy);
         inst.votingModule = FACTORY.create(
             VOTING_BEACON,
-            abi.encodeWithSelector(
-                BasisPointsVotingModule.initialize.selector, p.maxVotingPoints, vps, inst.distributionManager, p.owner
+            abi.encodeWithSignature(
+                "initialize(uint256,address[],address,address,bytes32)",
+                p.maxVotingPoints,
+                vps,
+                inst.distributionManager,
+                p.owner,
+                familyId
             ),
             keccak256(abi.encodePacked(baseSalt, "voting"))
         );
@@ -211,6 +266,12 @@ contract CrowdStakeDeployer {
         AbstractToken(inst.token).transferOwnership(p.owner);
         AbstractDistributionManager(inst.distributionManager).transferOwnership(p.owner);
         AbstractCycleModule(inst.cycleModule).transferOwnership(p.owner);
+
+        // Record the family sibling only after full wiring, so a resolved instance is usable.
+        if (p.crossChain) {
+            familyInstances[familyId] = inst;
+            emit FamilyDeployed(familyId, msg.sender, p.owner);
+        }
 
         emit SystemDeployed(p.owner, msg.sender, p.salt, inst);
     }

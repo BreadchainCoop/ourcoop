@@ -118,8 +118,8 @@ export function YieldSliceExplainer() {
             Where the funding comes from
           </Heading2>
           <Body className="text-surface-grey-2 mx-auto mt-4 text-lg">
-            Your savings do the work while staying yours. Here&apos;s how a slice
-            of yield — and only the yield — turns into funding for your
+            Your savings do the work while staying yours. Here&apos;s how a
+            slice of yield — and only the yield — turns into funding for your
             community.
           </Body>
         </div>
@@ -211,7 +211,10 @@ function StepDetail({
         <s.Icon size={28} weight="bold" className="text-core-orange" />
       </div>
 
-      <div key={s.key} className={reducedMotion ? undefined : "animate-fade-in"}>
+      <div
+        key={s.key}
+        className={reducedMotion ? undefined : "animate-fade-in"}
+      >
         <div className="flex flex-wrap items-center gap-3">
           <Heading4 className="text-text-standard">{s.title}</Heading4>
           <Chip size="small" className="text-primary-jade">
@@ -316,9 +319,7 @@ function FlowDiagram({
           <div
             className={cn(
               "relative w-full max-w-[240px] rounded-2xl border-2 p-2",
-              on.slice || on.skim
-                ? "border-core-orange"
-                : "border-paper-2",
+              on.slice || on.skim ? "border-core-orange" : "border-paper-2",
               motion,
             )}
           >
@@ -359,7 +360,7 @@ function FlowDiagram({
                   size={16}
                   weight="fill"
                   className={cn(
-                    "text-core-orange absolute -right-1 bg-paper-0",
+                    "text-core-orange bg-paper-0 absolute -right-1",
                     reducedMotion ? "" : "animate-fade-in",
                   )}
                 />

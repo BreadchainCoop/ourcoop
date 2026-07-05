@@ -12,6 +12,10 @@ type Variant = "primary" | "secondary" | "destructive";
  * Primary action button that's connection-aware: prompts to connect when
  * disconnected and to switch to Gnosis on the wrong chain, otherwise runs the
  * action. Lets pages show their full form before a wallet is connected.
+ *
+ * `chainless` actions (e.g. signing a cross-chain ballot) skip the switch-chain
+ * branch — the signature is valid on every chain, so no wallet chain matters —
+ * while keeping the connect-first gating.
  */
 export function ActionButton({
   children,
@@ -20,6 +24,7 @@ export function ActionButton({
   disabled,
   variant = "primary",
   className = "w-full",
+  chainless = false,
 }: {
   children: ReactNode;
   onClick: () => void;
@@ -27,6 +32,7 @@ export function ActionButton({
   disabled?: boolean;
   variant?: Variant;
   className?: string;
+  chainless?: boolean;
 }) {
   const { isConnected, chainId } = useAccount();
   const { openConnectModal } = useConnectModal();
@@ -46,7 +52,7 @@ export function ActionButton({
     );
   }
 
-  if (chainId !== target.id) {
+  if (!chainless && chainId !== target.id) {
     return (
       <Button
         app="fund"

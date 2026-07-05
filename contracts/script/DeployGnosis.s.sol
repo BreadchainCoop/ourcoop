@@ -178,8 +178,9 @@ contract DeployGnosis is Script {
         vpStrategies[0] = IVotingPowerStrategy(votingPowerStrategy);
         votingModule = factory.create(
             votingModuleBeacon,
-            abi.encodeWithSelector(
-                BasisPointsVotingModule.initialize.selector,
+            // encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
+            abi.encodeWithSignature(
+                "initialize(uint256,address[],address,address)",
                 p.maxVotingPoints,
                 vpStrategies,
                 distributionManager,

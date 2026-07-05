@@ -60,6 +60,25 @@ and boots straight into it — no registry, no backend. The page white-labels to
 that instance (its banner + ticker), and the deploy-success screen shows a
 copyable link plus a QR code.
 
+## Multi-chain communities (cross-chain voting)
+
+A community can deploy the **same token on several chains at once** (Gnosis,
+Arbitrum, Optimism — Ethereum once its deployer ships). The deploy page lets
+you pick multiple chains; the instances are linked on-chain by a deterministic
+`familyId`, and the app groups them as one community.
+
+Voting is **sign once, count everywhere**: family instances use a
+chain-agnostic EIP-712 signature (`castCrossChainVote`) that is valid on every
+sibling chain, delivered by the [relay service](./relay/) (HTTP API + on-chain
+listener). The same ballot lands on every chain, weighted by the voter's stake
+on that chain. The relay can only censor — never forge — and delivery is
+permissionless, so anyone can re-submit a censored vote (the signature is
+re-emitted in the `CrossChainVoteCast` event).
+
+Point the frontend at one or more relays with `NEXT_PUBLIC_RELAY_URLS`
+(comma-separated). Without a relay the vote page falls back to wallet
+submission per chain plus a copyable signed-vote payload.
+
 ## Releases
 
 Contracts are released independently — see [GitHub Releases](https://github.com/BreadchainCoop/crowdstake.fun/releases) (latest: `v0.0.2`).

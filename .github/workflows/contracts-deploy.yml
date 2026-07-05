@@ -13,12 +13,13 @@ name: Deploy contracts (multi-chain)
 # fetches that manifest at runtime (src/lib/remote-addresses.ts), so NO frontend
 # rebuild/redeploy is needed to pick up new addresses.
 #
-# Chains: gnosis (native xDAI → sDAI) · arbitrum / optimism (stablecoin USDC →
-# Morpho vaults). Per-chain yield config comes from the yield_kind/asset/
+# Chains: gnosis (native xDAI → sDAI) · arbitrum / optimism / ethereum (stablecoin
+# USDC → Morpho vaults). Per-chain yield config comes from the yield_kind/asset/
 # yield_vault inputs — see contracts/deployments/yield-assets.md.
 #
 # Requires repo secrets: DEPLOY_PRIVATE_KEY (funded on the target chain), and
-# optionally GNOSIS_RPC_URL / ARBITRUM_RPC_URL / OPTIMISM_RPC_URL (else public).
+# optionally GNOSIS_RPC_URL / ARBITRUM_RPC_URL / OPTIMISM_RPC_URL / ETHEREUM_RPC_URL
+# (else public).
 
 on:
   workflow_dispatch:
@@ -31,6 +32,7 @@ on:
           - gnosis
           - arbitrum
           - optimism
+          - ethereum
       target:
         description: "What to deploy"
         type: choice
@@ -112,6 +114,10 @@ jobs:
               ID=10
               RPC="${{ secrets.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io' }}"
               BS="https://optimism.blockscout.com" ;;
+            ethereum)
+              ID=1
+              RPC="${{ secrets.ETHEREUM_RPC_URL || 'https://ethereum-rpc.publicnode.com' }}"
+              BS="https://eth.blockscout.com" ;;
           esac
           echo "id=$ID" >> "$GITHUB_OUTPUT"
           echo "rpc=$RPC" >> "$GITHUB_OUTPUT"

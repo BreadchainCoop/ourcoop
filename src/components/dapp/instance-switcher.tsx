@@ -20,9 +20,53 @@ import {
   instanceShareUrl,
   resolveInstance,
 } from "@/lib/instance";
-import { DEFAULT_CHAIN_ID, isSupportedChain } from "@/lib/chains";
+import {
+  DEFAULT_CHAIN_ID,
+  isSupportedChain,
+  shortChainName,
+} from "@/lib/chains";
 import { shortenAddress } from "@/lib/format";
 import { cn, copyToClipboard } from "@/lib/utils";
+import type { KnownInstance } from "@/lib/instance";
+
+/** A family group (siblings sharing a familyId) or a standalone instance. */
+type SwitcherRow =
+  | { kind: "instance"; instance: KnownInstance }
+  | {
+      kind: "family";
+      familyId: string;
+      label: string;
+      /** The canonical share-link sibling (primaryChainId, else the first). */
+      primary: KnownInstance;
+      siblings: KnownInstance[];
+    };
+
+/** Group known instances by familyId; classic instances pass through as-is. */
+function groupInstances(known: KnownInstance[]): SwitcherRow[] {
+  const families = new Map<string, KnownInstance[]>();
+  const rows: SwitcherRow[] = [];
+  for (const inst of known) {
+    if (inst.familyId) {
+      const list = families.get(inst.familyId) ?? [];
+      list.push(inst);
+      families.set(inst.familyId, list);
+    } else {
+      rows.push({ kind: "instance", instance: inst });
+    }
+  }
+  for (const [familyId, siblings] of families) {
+    const primary =
+      siblings.find((s) => s.chainId === s.primaryChainId) ?? siblings[0];
+    rows.push({
+      kind: "family",
+      familyId,
+      label: primary.label,
+      primary,
+      siblings,
+    });
+  }
+  return rows;
+}
 
 /** A small colored disc showing an instance label's initial (list rows). */
 function InitialDisc({ label }: { label: string }) {
@@ -115,79 +159,40 @@ export function InstanceSwitcher() {
             <p className="text-surface-grey px-2 py-1 text-xs font-semibold">
               Your instances
             </p>
-            {known.map((inst) => {
+            {groupInstances(known).map((row) => {
+              const onActivate = (dm: Address) => {
+                setActive(dm);
+                setOpen(false);
+              };
+              if (row.kind === "family") {
+                return (
+                  <FamilyGroupRow
+                    key={`family-${row.familyId}`}
+                    row={row}
+                    activeDm={addresses.distributionManager}
+                    copied={copied}
+                    onActivate={onActivate}
+                    onCopy={onCopy}
+                    onRemove={removeInstance}
+                  />
+                );
+              }
+              const inst = row.instance;
               const dm = inst.addresses.distributionManager;
-              const isActive =
-                dm.toLowerCase() ===
-                addresses.distributionManager.toLowerCase();
-              const isDefault = dm.toLowerCase() === defaultDm;
-              const isCopied = copied === dm.toLowerCase();
               return (
-                <div
+                <InstanceRow
                   key={dm}
-                  className={cn(
-                    "group hover:bg-paper-1 flex items-center gap-1 rounded-lg px-1.5 py-1.5",
-                    isActive && "bg-paper-1",
-                  )}
-                >
-                  <button
-                    onClick={() => {
-                      setActive(dm);
-                      setOpen(false);
-                    }}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                  >
-                    <InitialDisc label={inst.label} />
-                    <span className="min-w-0">
-                      <span
-                        className={cn(
-                          "block truncate text-sm",
-                          isActive
-                            ? "text-core-orange font-semibold"
-                            : "text-text-standard",
-                        )}
-                      >
-                        {inst.label}
-                      </span>
-                      <span className="text-surface-grey block truncate font-mono text-[11px]">
-                        {shortenAddress(dm, 4)}
-                      </span>
-                    </span>
-                    {isActive && (
-                      <Check
-                        size={16}
-                        weight="bold"
-                        className="text-core-orange flex-none"
-                      />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => onCopy(dm, inst.chainId)}
-                    aria-label="Copy shareable link"
-                    title="Copy shareable link"
-                    className={cn(
-                      "flex-none rounded p-1.5",
-                      isCopied
-                        ? "text-system-green"
-                        : "text-surface-grey hover:text-text-standard",
-                    )}
-                  >
-                    {isCopied ? (
-                      <Check size={14} weight="bold" />
-                    ) : (
-                      <Copy size={14} />
-                    )}
-                  </button>
-                  {!isDefault && (
-                    <button
-                      onClick={() => removeInstance(dm)}
-                      aria-label="Remove instance"
-                      className="text-surface-grey hover:text-system-red flex-none rounded p-1.5"
-                    >
-                      <X size={14} weight="bold" />
-                    </button>
-                  )}
-                </div>
+                  inst={inst}
+                  isActive={
+                    dm.toLowerCase() ===
+                    addresses.distributionManager.toLowerCase()
+                  }
+                  isDefault={dm.toLowerCase() === defaultDm}
+                  isCopied={copied === dm.toLowerCase()}
+                  onActivate={onActivate}
+                  onCopy={onCopy}
+                  onRemove={removeInstance}
+                />
               );
             })}
 
@@ -230,6 +235,210 @@ export function InstanceSwitcher() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Copy-link + remove buttons shared by instance and family rows. */
+function RowActions({
+  dm,
+  chainId,
+  removable,
+  isCopied,
+  copyLabel = "Copy shareable link",
+  removeLabel = "Remove instance",
+  onCopy,
+  onRemove,
+}: {
+  dm: Address;
+  chainId: number;
+  removable: boolean;
+  isCopied: boolean;
+  copyLabel?: string;
+  removeLabel?: string;
+  onCopy: (dm: Address, chainId: number) => void;
+  onRemove: (dm: Address) => void;
+}) {
+  return (
+    <>
+      <button
+        onClick={() => onCopy(dm, chainId)}
+        aria-label={copyLabel}
+        title={copyLabel}
+        className={cn(
+          "flex-none rounded p-1.5",
+          isCopied
+            ? "text-system-green"
+            : "text-surface-grey hover:text-text-standard",
+        )}
+      >
+        {isCopied ? <Check size={14} weight="bold" /> : <Copy size={14} />}
+      </button>
+      {removable && (
+        <button
+          onClick={() => onRemove(dm)}
+          aria-label={removeLabel}
+          className="text-surface-grey hover:text-system-red flex-none rounded p-1.5"
+        >
+          <X size={14} weight="bold" />
+        </button>
+      )}
+    </>
+  );
+}
+
+/** A standalone (non-family) instance row. */
+function InstanceRow({
+  inst,
+  isActive,
+  isDefault,
+  isCopied,
+  onActivate,
+  onCopy,
+  onRemove,
+}: {
+  inst: KnownInstance;
+  isActive: boolean;
+  isDefault: boolean;
+  isCopied: boolean;
+  onActivate: (dm: Address) => void;
+  onCopy: (dm: Address, chainId: number) => void;
+  onRemove: (dm: Address) => void;
+}) {
+  const dm = inst.addresses.distributionManager;
+  return (
+    <div
+      className={cn(
+        "group hover:bg-paper-1 flex items-center gap-1 rounded-lg px-1.5 py-1.5",
+        isActive && "bg-paper-1",
+      )}
+    >
+      <button
+        onClick={() => onActivate(dm)}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
+        <InitialDisc label={inst.label} />
+        <span className="min-w-0">
+          <span
+            className={cn(
+              "block truncate text-sm",
+              isActive
+                ? "text-core-orange font-semibold"
+                : "text-text-standard",
+            )}
+          >
+            {inst.label}
+          </span>
+          <span className="text-surface-grey block truncate font-mono text-[11px]">
+            {shortenAddress(dm, 4)}
+          </span>
+        </span>
+        {isActive && (
+          <Check
+            size={16}
+            weight="bold"
+            className="text-core-orange flex-none"
+          />
+        )}
+      </button>
+      <RowActions
+        dm={dm}
+        chainId={inst.chainId}
+        removable={!isDefault}
+        isCopied={isCopied}
+        onCopy={onCopy}
+        onRemove={onRemove}
+      />
+    </div>
+  );
+}
+
+/**
+ * A family group: one row for the whole cross-chain community, with a chain chip
+ * per sibling (active chip highlighted). Copy shares the canonical (primary
+ * chain) link; remove drops the whole family group at once.
+ */
+function FamilyGroupRow({
+  row,
+  activeDm,
+  copied,
+  onActivate,
+  onCopy,
+  onRemove,
+}: {
+  row: Extract<SwitcherRow, { kind: "family" }>;
+  activeDm: Address;
+  copied: string | null;
+  onActivate: (dm: Address) => void;
+  onCopy: (dm: Address, chainId: number) => void;
+  onRemove: (dm: Address) => void;
+}) {
+  const primaryDm = row.primary.addresses.distributionManager;
+  const familyActive = row.siblings.some(
+    (s) =>
+      s.addresses.distributionManager.toLowerCase() === activeDm.toLowerCase(),
+  );
+  return (
+    <div
+      className={cn(
+        "hover:bg-paper-1 rounded-lg px-1.5 py-1.5",
+        familyActive && "bg-paper-1",
+      )}
+    >
+      <div className="flex items-center gap-1">
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <InitialDisc label={row.label} />
+          <span className="min-w-0">
+            <span
+              className={cn(
+                "block truncate text-sm",
+                familyActive
+                  ? "text-core-orange font-semibold"
+                  : "text-text-standard",
+              )}
+            >
+              {row.label}
+            </span>
+            <span className="text-surface-grey block truncate text-[11px]">
+              on {row.siblings.length} chains
+            </span>
+          </span>
+        </span>
+        <RowActions
+          dm={primaryDm}
+          chainId={row.primary.chainId}
+          removable
+          isCopied={copied === primaryDm.toLowerCase()}
+          copyLabel="Copy family link"
+          removeLabel="Remove family"
+          onCopy={onCopy}
+          onRemove={() =>
+            row.siblings.forEach((s) =>
+              onRemove(s.addresses.distributionManager),
+            )
+          }
+        />
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1 pl-9">
+        {row.siblings.map((s) => {
+          const dm = s.addresses.distributionManager;
+          const chipActive = dm.toLowerCase() === activeDm.toLowerCase();
+          return (
+            <button
+              key={dm}
+              onClick={() => onActivate(dm)}
+              className={cn(
+                "rounded-md border px-2 py-0.5 text-[11px] font-medium",
+                chipActive
+                  ? "border-core-orange text-core-orange bg-core-orange/5"
+                  : "border-paper-2 text-surface-grey-2 hover:border-core-orange/50",
+              )}
+            >
+              {shortChainName(s.chainId)}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

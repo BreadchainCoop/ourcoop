@@ -28,6 +28,10 @@ contract BasisPointsVotingModule is AbstractVotingModule {
         /// @notice Tracks points allocated by each voter in each cycle
         /// @dev cycle => voter => points array
         mapping(uint256 => mapping(address => uint256[])) voterCyclePoints;
+        /// @notice Exact per-recipient allocations applied to projectDistributions
+        /// @dev cycle => voter => allocations. Recasts subtract these stored values (never a
+        ///      recomputation), eliminating integer-rounding underflow on recast.
+        mapping(uint256 => mapping(address => uint256[])) voterCycleAllocations;
     }
 
     // keccak256(abi.encode(uint256(keccak256("crowdstake.storage.BasisPointsVotingModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -66,6 +70,12 @@ contract BasisPointsVotingModule is AbstractVotingModule {
         return _getBasisPointsVotingModuleStorage().voterCyclePoints[cycle][voter][index];
     }
 
+    /// @notice Exact per-recipient allocation applied by a voter in a cycle
+    /// @dev cycle => voter => allocations array (as applied to projectDistributions)
+    function voterCycleAllocations(uint256 cycle, address voter, uint256 index) public view returns (uint256) {
+        return _getBasisPointsVotingModuleStorage().voterCycleAllocations[cycle][voter][index];
+    }
+
     // ============ Constructor ============
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -93,7 +103,78 @@ contract BasisPointsVotingModule is AbstractVotingModule {
         __AbstractVotingModule_init(_strategies, _distributionModule, _owner);
     }
 
+    /// @notice Initializes the basis points voting module as a cross-chain family instance
+    /// @dev Overload of the classic initializer with a familyId. When _familyId != 0 the five
+    ///      legacy vote entrypoints are disabled (CrossChainOnly) and castCrossChainVote is the
+    ///      single vote path. _familyId = 0 behaves exactly like the 4-arg initializer.
+    /// @param _maxPoints Maximum points that can be allocated per recipient
+    /// @param _strategies Array of voting power strategy contracts to use for power calculation
+    /// @param _distributionModule Address of the distribution module (recipientRegistry and cycleModule are derived from it)
+    /// @param _owner Address that will own this contract (receives onlyOwner privileges)
+    /// @param _familyId Cross-chain family identity from CrowdStakeDeployer.familyIdOf
+    function initialize(
+        uint256 _maxPoints,
+        IVotingPowerStrategy[] calldata _strategies,
+        address _distributionModule,
+        address _owner,
+        bytes32 _familyId
+    ) external initializer {
+        _getBasisPointsVotingModuleStorage().maxPoints = _maxPoints;
+        __AbstractVotingModule_init(_strategies, _distributionModule, _owner, _familyId);
+    }
+
+    // ============ Modifiers ============
+
+    /// @dev Family instances (familyId != 0) accept votes ONLY via castCrossChainVote — the
+    ///      legacy paths would let a chain-bound vote silently diverge from the family ballot.
+    modifier onlyClassic() {
+        if (familyId() != bytes32(0)) revert CrossChainOnly();
+        _;
+    }
+
     // ============ External Functions ============
+
+    /// @notice Casts a cross-chain family vote authorized by a chain-agnostic EIP-712 signature
+    /// @dev Permissionless delivery: anyone (relay, listener, the voter) can submit. The signed
+    ///      recipient set is identity-mapped onto the local registry order, so points land on
+    ///      the correct recipients regardless of per-chain ordering; membership drift reverts.
+    /// @param voter The voter who signed the ballot
+    /// @param points Points per signed recipient (parallel to `recipients`)
+    /// @param recipients The recipient set as seen on the signing chain
+    /// @param nonce Monotonic cross-chain nonce (must exceed lastCrossChainNonce)
+    /// @param deadline Unix timestamp after which the signature is invalid
+    /// @param signature Chain-agnostic EIP-712 signature over the family domain
+    function castCrossChainVote(
+        address voter,
+        uint256[] calldata points,
+        address[] calldata recipients,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        AbstractVotingModuleStorage storage base = _getAbstractVotingModuleStorage();
+        if (base.familyId == bytes32(0)) revert CrossChainNotEnabled();
+        if (block.timestamp > deadline) revert SignatureExpired();
+        if (nonce <= base.lastCrossChainNonce[voter]) revert StaleNonce();
+
+        uint256[] memory localPoints = _mapPointsToLocalRecipients(points, recipients);
+        _validateCrossChainVotePoints(localPoints);
+
+        if (!validateCrossChainSignature(voter, points, recipients, nonce, deadline, signature)) {
+            revert InvalidSignature();
+        }
+
+        uint256 votingPower = _calculateTotalVotingPower(voter);
+        if (votingPower == 0) revert ZeroVotingPower();
+
+        base.lastCrossChainNonce[voter] = nonce;
+
+        _processVote(voter, localPoints, votingPower);
+
+        // Re-emit the full signed payload so any listener can re-deliver it to siblings.
+        emit CrossChainVoteCast(voter, points, recipients, votingPower, nonce, deadline, signature);
+        emit VoteCast(voter, localPoints, votingPower, nonce, signature);
+    }
 
     /// @notice Casts a vote with an EIP-712 signature
     /// @dev Validates the signature and processes the vote using the voter's current voting power.
@@ -104,6 +185,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
     /// @param signature EIP-712 signature authorizing this vote
     function castVoteWithSignature(address voter, uint256[] calldata points, uint256 nonce, bytes calldata signature)
         external
+        onlyClassic
     {
         _castSingleVote(voter, points, nonce, signature);
     }
@@ -123,7 +205,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
         uint256 nonce,
         bytes calldata signature,
         bytes calldata additionalData
-    ) external {
+    ) external onlyClassic {
         _castSingleVoteWithParams(voter, points, nonce, signature, additionalData);
     }
 
@@ -133,7 +215,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
     ///      Emits VoteWithData. See Issue #62.
     /// @param points Array of basis points to allocate to each recipient
     /// @param data Arbitrary bytes data forwarded to _handleAdditionalVoteData
-    function voteWithData(uint256[] calldata points, bytes calldata data) external {
+    function voteWithData(uint256[] calldata points, bytes calldata data) external onlyClassic {
         if (hasVotedInCurrentCycle(msg.sender)) revert AlreadyVotedInCurrentCycle();
         if (!_validateVotePoints(points)) revert InvalidPointsDistribution();
 
@@ -154,6 +236,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
     function voteWithDataBatch(address[] calldata voters, uint256[][] calldata points, bytes[] calldata data)
         external
         onlyOwner
+        onlyClassic
     {
         if (voters.length != points.length) revert ArrayLengthMismatch();
         if (voters.length != data.length) revert ArrayLengthMismatch();
@@ -180,7 +263,7 @@ contract BasisPointsVotingModule is AbstractVotingModule {
         uint256[][] calldata points,
         uint256[] calldata nonces,
         bytes[] calldata signatures
-    ) external {
+    ) external onlyClassic {
         // Validate array lengths match
         if (voters.length != points.length) revert ArrayLengthMismatch();
         if (voters.length != nonces.length) revert ArrayLengthMismatch();
@@ -231,10 +314,12 @@ contract BasisPointsVotingModule is AbstractVotingModule {
 
     /// @notice Processes and records a vote
     /// @dev Updates project distributions and cycle voting power. Handles vote recasting by replacing previous vote.
+    ///      Stores the EXACT applied allocations and subtracts those on recast (never a
+    ///      recomputation), so rounding can never underflow projectDistributions.
     /// @param voter Address of the voter
     /// @param points Array of points allocated to each recipient
     /// @param votingPower Total voting power of the voter
-    function _processVote(address voter, uint256[] calldata points, uint256 votingPower) internal virtual override {
+    function _processVote(address voter, uint256[] memory points, uint256 votingPower) internal virtual override {
         AbstractVotingModuleStorage storage base = _getAbstractVotingModuleStorage();
         BasisPointsVotingModuleStorage storage $ = _getBasisPointsVotingModuleStorage();
         uint256 currentCycle = base.cycleModule.getCurrentCycle();
@@ -245,16 +330,10 @@ contract BasisPointsVotingModule is AbstractVotingModule {
             // Revert previous vote's impact on total voting power
             base.totalCycleVotingPower[currentCycle] -= previousVotingPower;
 
-            // Revert previous vote's impact on project distributions
-            uint256[] storage previousPoints = $.voterCyclePoints[currentCycle][voter];
-            uint256 previousTotalPoints;
-            for (uint256 i = 0; i < previousPoints.length; i++) {
-                previousTotalPoints += previousPoints[i];
-            }
-            for (uint256 i = 0; i < previousPoints.length; i++) {
-                uint256 previousAllocation =
-                    (previousPoints[i] * previousVotingPower * PRECISION) / previousTotalPoints / PRECISION;
-                $.projectDistributions[currentCycle][i] -= previousAllocation;
+            // Revert previous vote's impact on project distributions — the exact stored values
+            uint256[] storage previousAllocations = $.voterCycleAllocations[currentCycle][voter];
+            for (uint256 i = 0; i < previousAllocations.length; i++) {
+                $.projectDistributions[currentCycle][i] -= previousAllocations[i];
             }
         }
 
@@ -267,14 +346,17 @@ contract BasisPointsVotingModule is AbstractVotingModule {
             totalPoints += points[i];
         }
 
-        // Store voter's current voting power and points, and update project distributions
+        // Store voter's current voting power, points and exact allocations, and update
+        // project distributions
         $.voterCyclePower[currentCycle][voter] = votingPower;
         delete $.voterCyclePoints[currentCycle][voter]; // Clear previous points array
+        delete $.voterCycleAllocations[currentCycle][voter]; // Clear previous allocations array
         for (uint256 i = 0; i < points.length; i++) {
             $.voterCyclePoints[currentCycle][voter].push(points[i]);
 
             // Calculate and update project distributions in same loop for gas efficiency
             uint256 allocation = (points[i] * votingPower * PRECISION) / totalPoints / PRECISION;
+            $.voterCycleAllocations[currentCycle][voter].push(allocation);
             if (i >= $.projectDistributions[currentCycle].length) {
                 $.projectDistributions[currentCycle].push(allocation);
             } else {
@@ -284,6 +366,44 @@ contract BasisPointsVotingModule is AbstractVotingModule {
 
         // Update last voted block number
         base.accountLastVotedBlock[voter] = block.number;
+    }
+
+    /// @dev Identity-maps the signed (recipients, points) pairs onto the LOCAL registry order.
+    ///      Every local recipient must match exactly one signed recipient (and lengths must be
+    ///      equal), so any membership drift, duplicate or unknown entry reverts loudly instead
+    ///      of landing points on the wrong recipient.
+    function _mapPointsToLocalRecipients(uint256[] calldata points, address[] calldata recipients)
+        private
+        view
+        returns (uint256[] memory localPoints)
+    {
+        address[] memory local = _getAbstractVotingModuleStorage().recipientRegistry.getRecipients();
+        if (recipients.length != local.length || points.length != recipients.length) revert RecipientSetMismatch();
+
+        localPoints = new uint256[](local.length);
+        for (uint256 i = 0; i < local.length; i++) {
+            bool found = false;
+            for (uint256 j = 0; j < recipients.length; j++) {
+                if (recipients[j] == local[i]) {
+                    if (found) revert RecipientSetMismatch();
+                    found = true;
+                    localPoints[i] = points[j];
+                }
+            }
+            if (!found) revert RecipientSetMismatch();
+        }
+    }
+
+    /// @dev _validateVotePoints semantics for the memory-mapped local points: the length is
+    ///      correct by construction, so only per-recipient max and non-zero sum are checked.
+    function _validateCrossChainVotePoints(uint256[] memory localPoints) private view {
+        uint256 _maxPoints = _getBasisPointsVotingModuleStorage().maxPoints;
+        uint256 totalPoints;
+        for (uint256 i = 0; i < localPoints.length; i++) {
+            if (localPoints[i] > _maxPoints) revert ExceedsMaxPoints();
+            totalPoints += localPoints[i];
+        }
+        if (totalPoints == 0) revert ZeroVotePoints();
     }
 
     /// @notice Validates vote points distribution

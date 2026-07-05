@@ -13,6 +13,8 @@ Monorepo: a **Next.js frontend at the repo root** and the **Foundry smart contra
 contracts/            Foundry project (the protocol)
   src/ test/ script/  Solidity + tests + deploy scripts
   foundry.toml        contracts build config (FOUNDRY_PROFILE=ci in CI)
+relay/                Cross-chain vote relay (standalone npm package, Node 20+;
+                      Hono + viem + SQLite; see relay/README.md)
 .github/workflows/    CI (contracts build/test today; etherform + web deploy to follow)
 ```
 

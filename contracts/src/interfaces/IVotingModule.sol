@@ -49,6 +49,24 @@ interface IVotingModule {
     /// @notice Thrown when a voter tries to vote twice in the same cycle via voteWithData or voteWithDataBatch
     error AlreadyVotedInCurrentCycle();
 
+    /// @notice Thrown when castCrossChainVote is called on a classic (familyId == 0) instance
+    error CrossChainNotEnabled();
+
+    /// @notice Thrown when a cross-chain vote signature is past its deadline
+    error SignatureExpired();
+
+    /// @notice Thrown when a cross-chain vote nonce does not exceed the voter's last accepted nonce
+    error StaleNonce();
+
+    /// @notice Thrown when the signed recipient set does not match the local registry membership
+    error RecipientSetMismatch();
+
+    /// @notice Thrown when a cross-chain voter has no voting power on this chain
+    error ZeroVotingPower();
+
+    /// @notice Thrown when a legacy vote entrypoint is called on a family (familyId != 0) instance
+    error CrossChainOnly();
+
     // ============ Events ============
 
     /// @notice Emitted when a vote is cast with a signature
@@ -69,6 +87,26 @@ interface IVotingModule {
     /// @param points The voting points allocated to each recipient
     /// @param data Arbitrary bytes data passed by the caller
     event VoteWithData(address indexed voter, uint256[] points, bytes data);
+
+    /// @notice Emitted when a cross-chain family vote is cast
+    /// @dev Re-emits the full signed payload so sync state is reconstructible from public data —
+    ///      any listener can pick this up and deliver the same signature to sibling chains.
+    /// @param voter The voter who signed the ballot
+    /// @param points Points per signed recipient, as signed (signing chain's order)
+    /// @param recipients The recipient set as signed (signing chain's order)
+    /// @param votingPower The voter's voting power on THIS chain
+    /// @param nonce The monotonic cross-chain nonce
+    /// @param deadline Unix timestamp after which the signature is invalid
+    /// @param signature The chain-agnostic EIP-712 signature
+    event CrossChainVoteCast(
+        address indexed voter,
+        uint256[] points,
+        address[] recipients,
+        uint256 votingPower,
+        uint256 nonce,
+        uint256 deadline,
+        bytes signature
+    );
 
     /// @notice Emitted when the voting module is initialized
     /// @param strategies Array of voting power strategies

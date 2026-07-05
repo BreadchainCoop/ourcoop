@@ -4,6 +4,7 @@ import {
   http,
   isAddress,
   type Address,
+  type Hex,
   type PublicClient,
 } from "viem";
 import {
@@ -22,6 +23,10 @@ export interface KnownInstance {
   label: string;
   chainId: number;
   addresses: InstanceAddresses;
+  /** Family membership (multi-chain instances) — absent on classic instances. */
+  familyId?: Hex;
+  /** The family's canonical share-link chain (defaults to this instance's). */
+  primaryChainId?: number;
 }
 
 /** The instance deployed with the protocol (always available, can't be removed). */
@@ -81,7 +86,9 @@ export function instanceShareUrl(
 
 // One read-only public client per chain, created lazily.
 const clients = new Map<number, PublicClient>();
-function clientFor(chainId: number): PublicClient {
+
+/** Read-only viem client pinned to a chain — shared by every cross-chain read. */
+export function publicClientFor(chainId: number): PublicClient {
   let c = clients.get(chainId);
   if (!c) {
     const cfg = chainConfig(chainId);
@@ -100,7 +107,7 @@ export async function resolveInstance(
   distributionManager: Address,
   chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<InstanceAddresses> {
-  const client = clientFor(chainId);
+  const client = publicClientFor(chainId);
   const base = {
     address: distributionManager,
     abi: distributionManagerAbi,

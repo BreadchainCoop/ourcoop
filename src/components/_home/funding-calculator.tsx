@@ -41,8 +41,8 @@ import { cn } from "@/lib/utils";
 /* --------------------------------- Model ---------------------------------- */
 
 const MEMBER_STOPS = [
-  5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 120, 150, 200, 250, 300, 400,
-  500, 750, 1000,
+  5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 120, 150, 200, 250, 300, 400, 500,
+  750, 1000,
 ];
 const STAKE_STOPS = [
   25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000, 3000,
@@ -154,9 +154,17 @@ function encodeState(s: State): string {
   const sf = s.solveFor === "members" ? 0 : 1;
   return (
     HASH_PREFIX +
-    [mode, sf, s.mIdx, s.sIdx, s.tIdx, s.hIdx, s.apy * 10, s.growth, s.msIdx].join(
-      ".",
-    )
+    [
+      mode,
+      sf,
+      s.mIdx,
+      s.sIdx,
+      s.tIdx,
+      s.hIdx,
+      s.apy * 10,
+      s.growth,
+      s.msIdx,
+    ].join(".")
   );
 }
 
@@ -197,8 +205,7 @@ export function FundingCalculator() {
     return () => window.removeEventListener("hashchange", hydrate);
   }, []);
 
-  const set = (patch: Partial<State>) =>
-    setState((s) => ({ ...s, ...patch }));
+  const set = (patch: Partial<State>) => setState((s) => ({ ...s, ...patch }));
 
   const d = useMemo(() => derive(state), [state]);
 
@@ -403,7 +410,10 @@ export function FundingCalculator() {
         <span className="font-bold">${usd(d.stake)}</span> each at{" "}
         <span className="font-bold">{fmtApy(state.apy)}% APY</span>
         {state.mode === "target" && (
-          <span className="text-surface-grey-2"> — solved from your target</span>
+          <span className="text-surface-grey-2">
+            {" "}
+            — solved from your target
+          </span>
         )}
       </Body>
 
@@ -420,8 +430,8 @@ export function FundingCalculator() {
                 : `$${usd(d.stake)} per member`}
             </p>
             <Caption className="text-surface-grey-2">
-              actual ≈ {approxUsd(d.monthly)}/mo against your $
-              {usd(d.target)}/mo target
+              actual ≈ {approxUsd(d.monthly)}/mo against your ${usd(d.target)}
+              /mo target
             </Caption>
             <div className="border-paper-2 mt-3 grid grid-cols-3 gap-2 border-t pt-3 text-center">
               {d.solvedAtRates.map((r) => (
@@ -505,9 +515,9 @@ export function FundingCalculator() {
           />
         </div>
         <p className="sr-only">
-          Over {horizon.months} months, cumulative funding reaches
-          approximately {approxUsd(d.cumMid[d.cumMid.length - 1])}, likely
-          between {approxUsd(d.cumLo[d.cumLo.length - 1])} and{" "}
+          Over {horizon.months} months, cumulative funding reaches approximately{" "}
+          {approxUsd(d.cumMid[d.cumMid.length - 1])}, likely between{" "}
+          {approxUsd(d.cumLo[d.cumLo.length - 1])} and{" "}
           {approxUsd(d.cumHi[d.cumHi.length - 1])}. Member deposits of{" "}
           {approxUsd(d.pool)} stay withdrawable throughout.
         </p>
@@ -616,8 +626,8 @@ export function FundingCalculator() {
               className="bg-paper-2 accent-core-orange mt-3 h-2 w-full cursor-pointer appearance-none rounded-full"
             />
             <Caption className="text-surface-grey mt-1 block">
-              Variable rate from over-collateralized lending. 7% is a
-              historical average, not a promise.
+              Variable rate from over-collateralized lending. 7% is a historical
+              average, not a promise.
             </Caption>
           </div>
 
@@ -647,9 +657,9 @@ export function FundingCalculator() {
           </div>
 
           <Caption className="text-surface-grey block">
-            How we calculate: monthly funding = pool × APY ÷ 12, simple
-            interest — yield is paid out each cycle, so nothing compounds and
-            principal never shrinks. The range shows {fmtApy(d.apyLo)}%–
+            How we calculate: monthly funding = pool × APY ÷ 12, simple interest
+            — yield is paid out each cycle, so nothing compounds and principal
+            never shrinks. The range shows {fmtApy(d.apyLo)}%–
             {fmtApy(d.apyHi)}% around your rate because lending rates move.
           </Caption>
         </div>
@@ -726,14 +736,13 @@ function derive(s: State) {
   // month (conservative for mid-horizon joiners). Loop, not closed form, so
   // the member cap stays on one code path.
   const months = HORIZONS[s.hIdx].months;
-  const membersAt = (m: number) =>
-    Math.min(members + s.growth * m, MEMBER_CAP);
+  const membersAt = (m: number) => Math.min(members + s.growth * m, MEMBER_CAP);
   const capped = members + s.growth * months > MEMBER_CAP;
   const series = (a: number) => {
     const out = [0];
     let acc = 0;
     for (let m = 1; m <= months; m++) {
-      acc += ((membersAt(m - 1) * stake * a) / 100 / 12);
+      acc += (membersAt(m - 1) * stake * a) / 100 / 12;
       out.push(acc);
     }
     return out;
@@ -745,8 +754,7 @@ function derive(s: State) {
   // Per-member figure uses average membership so growth doesn't inflate it.
   let memberMonths = 0;
   for (let m = 1; m <= months; m++) memberMonths += membersAt(m - 1);
-  const perMemberMonthly =
-    memberMonths > 0 ? cumMid[months] / memberMonths : 0;
+  const perMemberMonthly = memberMonths > 0 ? cumMid[months] / memberMonths : 0;
 
   const donorsNeeded = Math.max(1, Math.ceil(monthly / DONATION));
 
@@ -833,9 +841,7 @@ function ProjectionChart({ d }: { d: Derived }) {
   const band =
     line(d.cumHi) +
     " " +
-    d.cumLo
-      .map((v, i) => `L${x(n - i)},${y(d.cumLo[n - i])}`)
-      .join(" ") +
+    d.cumLo.map((v, i) => `L${x(n - i)},${y(d.cumLo[n - i])}`).join(" ") +
     " Z";
 
   const midIdx = Math.round(n / 2);

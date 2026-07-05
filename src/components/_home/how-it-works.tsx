@@ -81,11 +81,16 @@ export function HowItWorks() {
                     <Heading4 className="text-text-standard">
                       {step.title}
                     </Heading4>
-                    <Body className="text-surface-grey-2 mt-2">{step.body}</Body>
+                    <Body className="text-surface-grey-2 mt-2">
+                      {step.body}
+                    </Body>
                   </div>
                 </div>
 
-                <VisualFrame caption={step.caption} className={cn(flip && "lg:order-1")}>
+                <VisualFrame
+                  caption={step.caption}
+                  className={cn(flip && "lg:order-1")}
+                >
                   <step.Visual />
                 </VisualFrame>
               </li>

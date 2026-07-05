@@ -83,9 +83,9 @@ export function YieldEngine() {
           </Heading2>
           <Body className="text-surface-grey-2 mx-auto mt-4 text-lg">
             A closer look at step 2. The yield isn&apos;t magic — it&apos;s the
-            interest borrowers pay to take over-collateralized loans against your
-            pool. Here&apos;s the full chain, and why your principal is never at
-            risk.
+            interest borrowers pay to take over-collateralized loans against
+            your pool. Here&apos;s the full chain, and why your principal is
+            never at risk.
           </Body>
         </div>
 
@@ -105,7 +105,9 @@ export function YieldEngine() {
                     <Heading4 className="text-text-standard">
                       {step.title}
                     </Heading4>
-                    <Body className="text-surface-grey-2 mt-2">{step.body}</Body>
+                    <Body className="text-surface-grey-2 mt-2">
+                      {step.body}
+                    </Body>
                   </div>
                 </div>
 
@@ -238,7 +240,9 @@ function CollateralVisual() {
           </span>
         </div>
         <div className="bg-core-orange mt-1 flex h-[57%] items-center justify-center rounded-md">
-          <span className="text-[10px] font-bold text-white">Borrowed $100</span>
+          <span className="text-[10px] font-bold text-white">
+            Borrowed $100
+          </span>
         </div>
       </div>
     </div>
