@@ -7,6 +7,7 @@ import {
   planWindows,
   type FamilyDeployedLog,
   type ListenerRpc,
+  type RegistryLog,
   type VoteCastLog,
 } from "../src/listener.js";
 import { Store } from "../src/store.js";
@@ -88,11 +89,12 @@ describe("ChainListener.runOnce", () => {
   const chainId = 100;
   const familyId = ("0x" + "cd".repeat(32)) as Hex;
   const votingModule = "0x0000000000000000000000000000000000000011" as Address;
+  const registry = "0x0000000000000000000000000000000000000012" as Address;
   let store: Store;
 
   const instance = {
     cycleModule: "0x000000000000000000000000000000000000000a",
-    registry: "0x000000000000000000000000000000000000000b",
+    registry,
     token: "0x000000000000000000000000000000000000000c",
     votingPowerStrategy: "0x000000000000000000000000000000000000000d",
     distributionManager: "0x000000000000000000000000000000000000000e",
@@ -116,11 +118,53 @@ describe("ChainListener.runOnce", () => {
     signature: ("0x" + "55".repeat(65)) as Hex,
   };
 
+  const registryUpdateLog: RegistryLog = {
+    kind: "registry-update",
+    txHash: ("0x" + "a1".repeat(32)) as Hex,
+    logIndex: 1,
+    registry,
+    admin: "0x1111111111111111111111111111111111111111" as Address,
+    recipients: [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222",
+    ] as Address[],
+    nonce: 2n,
+    deadline: 99999999999n,
+    signature: ("0x" + "a2".repeat(65)) as Hex,
+  };
+
+  const proposalLog: RegistryLog = {
+    kind: "proposal",
+    txHash: ("0x" + "b1".repeat(32)) as Hex,
+    logIndex: 2,
+    registry,
+    proposalKey: ("0x" + "b0".repeat(32)) as Hex,
+    proposer: "0x1111111111111111111111111111111111111111" as Address,
+    candidate: "0x3333333333333333333333333333333333333333" as Address,
+    isAddition: true,
+    electorate: ["0x1111111111111111111111111111111111111111"] as Address[],
+    expiresAt: 99999999999n,
+    nonce: 1n,
+    signature: ("0x" + "b2".repeat(65)) as Hex,
+  };
+
+  const proposalVoteLog: RegistryLog = {
+    kind: "proposal-vote",
+    txHash: ("0x" + "c1".repeat(32)) as Hex,
+    logIndex: 4,
+    registry,
+    proposalKey: ("0x" + "b0".repeat(32)) as Hex,
+    voter: "0x2222222222222222222222222222222222222222" as Address,
+    deadline: 99999999999n,
+    signature: ("0x" + "c2".repeat(65)) as Hex,
+  };
+
   function makeRpc(overrides: Partial<ListenerRpc> = {}): ListenerRpc {
     return {
       getBlockNumber: async () => 1000n,
       getFamilyDeployedLogs: async () => [],
       getVoteCastLogs: async () => [],
+      getRegistryLogs: async () => [],
       readFamilyId: async () => familyId,
       ...overrides,
     };
@@ -139,7 +183,7 @@ describe("ChainListener.runOnce", () => {
       confirmations: 12n,
       maxLogRange: 2000n,
       onFamilyDeployed: async () => {},
-      onVotesIngested: () => {},
+      onActionsIngested: () => {},
     });
     await listener.runOnce();
     expect(store.getCursor(chainId)).toBe(1000n - 12n - 1n);
@@ -166,7 +210,9 @@ describe("ChainListener.runOnce", () => {
       confirmations: 5n,
       maxLogRange: 100n,
       onFamilyDeployed: async () => {},
-      onVotesIngested: () => kicked++,
+      onActionsIngested: () => {
+        kicked++;
+      },
     });
     store.setCursor(chainId, 900n);
     await listener.runOnce();
@@ -187,6 +233,108 @@ describe("ChainListener.runOnce", () => {
     expect(kicked).toBe(1);
   });
 
+  it("ingests all three registry events on known registries", async () => {
+    store.setFamilyChain(familyId, chainId, { ...instance });
+    const rpc = makeRpc({
+      getRegistryLogs: async (addresses, from, to) => {
+        expect(addresses).toEqual([registry.toLowerCase()]);
+        return from <= 990n && 990n <= to
+          ? [registryUpdateLog, proposalLog, proposalVoteLog]
+          : [];
+      },
+    });
+    const listener = new ChainListener({
+      chainId,
+      chainName: "test",
+      store,
+      rpc,
+      confirmations: 5n,
+      maxLogRange: 2000n,
+      onFamilyDeployed: async () => {},
+      onActionsIngested: () => {},
+    });
+    store.setCursor(chainId, 900n);
+    await listener.runOnce();
+
+    const update = store.getAction(
+      familyId,
+      "registry-update",
+      "0x1111111111111111111111111111111111111111" as Address,
+      "2",
+    );
+    expect(update?.recipients).toHaveLength(2);
+    expect(store.getJob(update!.id, chainId)?.state).toBe("confirmed");
+
+    const proposal = store.getAction(
+      familyId,
+      "proposal",
+      "0x1111111111111111111111111111111111111111" as Address,
+      ("0x" + "b0".repeat(32)) as Hex,
+    );
+    expect(proposal?.candidate?.toLowerCase()).toBe(
+      "0x3333333333333333333333333333333333333333",
+    );
+    expect(store.getJob(proposal!.id, chainId)?.txHash).toBe(
+      proposalLog.txHash,
+    );
+
+    const pv = store.getAction(
+      familyId,
+      "proposal-vote",
+      "0x2222222222222222222222222222222222222222" as Address,
+      ("0x" + "b0".repeat(32)) as Hex,
+    );
+    expect(pv).toBeDefined();
+    expect(store.getJob(pv!.id, chainId)?.state).toBe("confirmed");
+  });
+
+  it("unknown registry -> familyId() read fallback attributes the log", async () => {
+    // The registry is NOT in the family cache; readFamilyId(registry) resolves it.
+    let readTarget: Address | undefined;
+    const rpc = makeRpc({
+      getRegistryLogs: async (_addr, from, to) =>
+        from <= 990n && 990n <= to ? [registryUpdateLog] : [],
+      readFamilyId: async (target) => {
+        readTarget = target;
+        return familyId;
+      },
+    });
+    // A registry must be "known" to be scanned — seed the cache with the
+    // instance so knownRegistries returns it, but simulate a cache miss on the
+    // family-by-registry lookup by pointing the event at a DIFFERENT registry.
+    const otherRegistry =
+      "0x00000000000000000000000000000000000000ff" as Address;
+    store.setFamilyChain(familyId, chainId, { ...instance });
+    const listener = new ChainListener({
+      chainId,
+      chainName: "test",
+      store,
+      rpc: makeRpc({
+        getRegistryLogs: async (_addr, from, to) =>
+          from <= 990n && 990n <= to
+            ? [{ ...registryUpdateLog, registry: otherRegistry }]
+            : [],
+        readFamilyId: rpc.readFamilyId,
+      }),
+      confirmations: 5n,
+      maxLogRange: 2000n,
+      onFamilyDeployed: async () => {},
+      onActionsIngested: () => {},
+    });
+    store.setCursor(chainId, 900n);
+    await listener.runOnce();
+    // Fallback read was against the unknown registry.
+    expect(readTarget).toBe(otherRegistry);
+    // The action was still ingested under the resolved family.
+    const update = store.getAction(
+      familyId,
+      "registry-update",
+      "0x1111111111111111111111111111111111111111" as Address,
+      "2",
+    );
+    expect(update).toBeDefined();
+  });
+
   it("fans an ingested vote out to every sibling chain (not just the origin)", async () => {
     // A 3-chain family; the vote is emitted on chain 100 (origin).
     const siblingChains = [100, 10, 42161];
@@ -195,7 +343,7 @@ describe("ChainListener.runOnce", () => {
       getVoteCastLogs: async (_addr, from, to) =>
         from <= 990n && 990n <= to ? [voteLog] : [],
     });
-    // onVotesIngested mirrors index.ts#fanOutFamily: resolve siblings and
+    // onActionsIngested mirrors index.ts#fanOutFamily: resolve siblings and
     // ensure a job on every found chain (the origin job is already created
     // and confirmed by the listener itself).
     const listener = new ChainListener({
@@ -206,7 +354,7 @@ describe("ChainListener.runOnce", () => {
       confirmations: 5n,
       maxLogRange: 2000n,
       onFamilyDeployed: async () => {},
-      onVotesIngested: async (familyIds) => {
+      onActionsIngested: async (familyIds) => {
         for (const fid of familyIds) {
           const v = store.getVote(fid, voteLog.voter, "1")!;
           for (const cid of siblingChains) store.ensureJob(v.id, cid);
@@ -219,7 +367,7 @@ describe("ChainListener.runOnce", () => {
     const vote = store.getVote(familyId, voteLog.voter, "1");
     expect(vote).toBeDefined();
     // Jobs exist on ALL THREE chains, not just the origin.
-    const jobs = store.jobsForVote(vote!.id);
+    const jobs = store.jobsForAction(vote!.id);
     expect(jobs.map((j) => j.chainId).sort((a, b) => a - b)).toEqual(
       [...siblingChains].sort((a, b) => a - b),
     );
@@ -255,7 +403,7 @@ describe("ChainListener.runOnce", () => {
         // Simulates the production callback resolving + caching the family.
         store.setFamilyChain(fid, cid, { ...instance });
       },
-      onVotesIngested: () => {},
+      onActionsIngested: () => {},
     });
     store.setCursor(chainId, 998n);
     await listener.runOnce();
@@ -279,7 +427,7 @@ describe("ChainListener.runOnce", () => {
       onFamilyDeployed: async () => {},
       // Simulate a crash between ingestion and mark-seen: throw on the first
       // fan-out. The log must NOT be recorded as seen, or the replay drops it.
-      onVotesIngested: async () => {
+      onActionsIngested: async () => {
         if (failNext) {
           failNext = false;
           throw new Error("crash before fan-out commits");

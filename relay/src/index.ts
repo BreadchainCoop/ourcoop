@@ -8,7 +8,13 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { crossChainVoteCastEvent, familyDeployedEvent } from "./abi.js";
+import {
+  crossChainProposalCreatedEvent,
+  crossChainProposalVoteCastEvent,
+  crossChainRegistryUpdatedEvent,
+  crossChainVoteCastEvent,
+  familyDeployedEvent,
+} from "./abi.js";
 import { createChainAccess, viemChain } from "./chain-access.js";
 import { loadConfig, type ChainConfig } from "./config.js";
 import { Families } from "./families.js";
@@ -17,6 +23,7 @@ import {
   ChainListener,
   type FamilyDeployedLog,
   type ListenerRpc,
+  type RegistryLog,
   type VoteCastLog,
 } from "./listener.js";
 import { log, warn } from "./log.js";
@@ -71,9 +78,85 @@ function makeListenerRpc(chain: ChainConfig): ListenerRpc {
         signature: l.args.signature,
       }));
     },
-    readFamilyId(votingModule: Address): Promise<Hex> {
+    async getRegistryLogs(addresses, from, to): Promise<RegistryLog[]> {
+      // One getLogs per registry event type (viem filters on a single event's
+      // topic0); all bounded by the caller's window + bisect.
+      const [updated, created, voted] = await Promise.all([
+        client.getLogs({
+          address: addresses,
+          event: crossChainRegistryUpdatedEvent,
+          fromBlock: from,
+          toBlock: to,
+        }),
+        client.getLogs({
+          address: addresses,
+          event: crossChainProposalCreatedEvent,
+          fromBlock: from,
+          toBlock: to,
+        }),
+        client.getLogs({
+          address: addresses,
+          event: crossChainProposalVoteCastEvent,
+          fromBlock: from,
+          toBlock: to,
+        }),
+      ]);
+      const out: RegistryLog[] = [];
+      for (const l of parseEventLogs({
+        abi: [crossChainRegistryUpdatedEvent],
+        logs: updated,
+      })) {
+        out.push({
+          kind: "registry-update",
+          txHash: l.transactionHash,
+          logIndex: l.logIndex,
+          registry: getAddress(l.address),
+          admin: l.args.admin,
+          recipients: [...l.args.recipients],
+          nonce: l.args.nonce,
+          deadline: l.args.deadline,
+          signature: l.args.signature,
+        });
+      }
+      for (const l of parseEventLogs({
+        abi: [crossChainProposalCreatedEvent],
+        logs: created,
+      })) {
+        out.push({
+          kind: "proposal",
+          txHash: l.transactionHash,
+          logIndex: l.logIndex,
+          registry: getAddress(l.address),
+          proposalKey: l.args.proposalKey,
+          proposer: l.args.proposer,
+          candidate: l.args.candidate,
+          isAddition: l.args.isAddition,
+          electorate: [...l.args.electorate],
+          expiresAt: l.args.expiresAt,
+          nonce: l.args.nonce,
+          signature: l.args.signature,
+        });
+      }
+      for (const l of parseEventLogs({
+        abi: [crossChainProposalVoteCastEvent],
+        logs: voted,
+      })) {
+        out.push({
+          kind: "proposal-vote",
+          txHash: l.transactionHash,
+          logIndex: l.logIndex,
+          registry: getAddress(l.address),
+          proposalKey: l.args.proposalKey,
+          voter: l.args.voter,
+          deadline: l.args.deadline,
+          signature: l.args.signature,
+        });
+      }
+      return out;
+    },
+    readFamilyId(target: Address): Promise<Hex> {
       return client.readContract({
-        address: votingModule,
+        address: target,
         abi: [
           {
             type: "function",
@@ -143,22 +226,21 @@ async function main(): Promise<void> {
         access.getPendingTransactionCount(account.address),
       ),
       gasBudget,
-      resolveVotingModule: (familyId) =>
-        families.votingModule(familyId, chain.chainId),
+      resolveInstance: (familyId) => families.instance(familyId, chain.chainId),
     });
     workers.set(chain.chainId, worker);
     worker.start();
   }
 
-  /** Fan a family's unexpired votes out as jobs on every found chain. */
+  /** Fan a family's unexpired actions (all kinds) out as jobs on every found chain. */
   async function fanOutFamily(familyId: Hex): Promise<void> {
     const siblings = await families.resolve(familyId);
     const nowSec = Math.floor(Date.now() / 1000);
-    const votes = store.unexpiredVotes(familyId, nowSec);
-    for (const vote of votes) {
+    const actions = store.unexpiredActions(familyId, nowSec);
+    for (const action of actions) {
       for (const [chainId, res] of siblings) {
         if (res.status !== "found") continue;
-        if (store.ensureJob(vote.id, chainId)) {
+        if (store.ensureJob(action.id, chainId)) {
           workers.get(chainId)?.kick();
         }
       }
@@ -182,10 +264,10 @@ async function main(): Promise<void> {
           await families.resolveChain(familyId, chainId, { force: true });
           await fanOutFamily(familyId);
         },
-        onVotesIngested: async (familyIds) => {
-          // A listener-ingested vote landed on its origin chain; fan its
-          // unexpired ballots out as jobs on every sibling and kick them
-          // (mirrors the API's fanOutFamily — kicking alone does nothing
+        onActionsIngested: async (familyIds) => {
+          // A listener-ingested action landed on its origin chain; fan the
+          // family's unexpired actions out as jobs on every sibling and kick
+          // them (mirrors the API's fanOutFamily — kicking alone does nothing
           // until sibling jobs exist).
           for (const familyId of familyIds) await fanOutFamily(familyId);
         },

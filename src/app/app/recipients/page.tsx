@@ -40,8 +40,16 @@ import {
   type Proposal,
 } from "@/hooks/use-recipient-voting";
 import { shortenAddress } from "@/lib/format";
-import { addressUrl } from "@/lib/chains";
+import { addressUrl, shortChainName } from "@/lib/chains";
 import { useActiveChainId } from "@/components/instance-provider";
+import { useFamily } from "@/hooks/use-family";
+import {
+  useCrossChainProposals,
+  useSiblingProposalExpiry,
+  type CrossChainProposal,
+} from "@/hooks/use-cross-chain-proposals";
+import { MultiChainActionStatus } from "@/components/dapp/multi-chain-action-status";
+import type { ChainActionRow } from "@/lib/cross-chain-action";
 
 export default function RecipientsPage() {
   return (
@@ -58,7 +66,9 @@ export default function RecipientsPage() {
 /** Render the admin or democratic flow based on the instance's registry type. */
 function RecipientsRouter() {
   const { kind, isLoading } = useRegistryKind();
-  if (kind === "unknown" || isLoading) {
+  const family = useFamily();
+  // familyId not yet known — hold the skeleton so we never flash the wrong mode.
+  if (kind === "unknown" || isLoading || family.isLoading) {
     return (
       <Card>
         <Caption className="text-surface-grey-2">
@@ -67,7 +77,16 @@ function RecipientsRouter() {
       </Card>
     );
   }
-  return kind === "voting" ? <DemocraticRecipients /> : <AdminRecipients />;
+  if (kind === "voting") {
+    // Democratic family instances propose + vote sign-once cross-chain; classic
+    // democratic instances keep the single-chain flow unchanged.
+    return family.isFamily ? (
+      <FamilyDemocraticRecipients family={family} />
+    ) : (
+      <DemocraticRecipients />
+    );
+  }
+  return <AdminRecipients />;
 }
 
 const lc = (a: string) => a.toLowerCase();
@@ -910,6 +929,399 @@ function DemocraticAdmin({
           )}
         </div>
       )}
+    </Card>
+  );
+}
+
+/* ============ Democratic (family — sign-once cross-chain) ============ */
+
+/** Human copy for each per-chain state of a cross-chain proposal / vote. */
+function proposalStateLabel(row: ChainActionRow): string {
+  switch (row.state) {
+    case "confirmed":
+      return "Landed";
+    case "superseded":
+      return "Superseded";
+    case "recipient_mismatch":
+      return "Recipient list out of sync here";
+    case "unreachable":
+      return "Couldn't reach chain";
+    case "awaiting_submission":
+      return "Relay unavailable — submit from your wallet";
+    case "failed":
+      return row.error ?? "Delivery failed";
+    case "submitted":
+      return "Submitted — confirming…";
+    case "relaying":
+      return "Relaying…";
+    case "signing":
+      return "Waiting for your signature…";
+    default:
+      return "Waiting…";
+  }
+}
+
+/**
+ * Democratic recipient governance for a multi-chain family. Proposals and votes
+ * are signed ONCE and replayed on every sibling chain (the proposalKey is the
+ * EIP-712 struct hash, so the same proposal exists everywhere). The signed
+ * electorate must match each chain's recipient set — drift is surfaced so the
+ * admin can sync it first. Settlement is per chain, confirmed on-chain.
+ */
+function FamilyDemocraticRecipients({
+  family,
+}: {
+  family: ReturnType<typeof useFamily>;
+}) {
+  const chainId = useActiveChainId();
+  const { isConnected, address } = useAccount();
+  const { recipients } = useRecipients();
+  const isRec = useIsRecipient();
+  const amRecipient = Boolean(isRec.data);
+  const cc = useCrossChainProposals(family);
+  const minExpiry = useSiblingProposalExpiry(family);
+
+  const [newAddr, setNewAddr] = useState("");
+  const valid = isAddress(newAddr) && lc(newAddr) !== zeroAddress;
+  const dup = valid && recipients.some((r) => lc(r) === lc(newAddr));
+
+  // Any sibling whose recipient membership differs blocks proposal delivery there.
+  const anyDrift = family.perChain.some((c) => c.drift);
+  const electorate = recipients as readonly Address[];
+
+  // now + min(sibling proposalExpiry): the on-chain ceiling on every chain.
+  const expiresAt =
+    minExpiry !== undefined
+      ? BigInt(Math.floor(Date.now() / 1000)) + minExpiry
+      : undefined;
+  const expiryDays =
+    minExpiry !== undefined ? Math.round(Number(minExpiry) / 86400) : null;
+
+  useEffect(() => {
+    if (cc.phase === "done") {
+      cc.refetch();
+      family.refetch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cc.phase]);
+
+  const canPropose =
+    amRecipient && valid && !dup && !anyDrift && expiresAt !== undefined;
+
+  const now = Math.floor(Date.now() / 1000);
+  const isExpired = (p: CrossChainProposal) => now > Number(p.expiresAt);
+  const open = cc.proposals.filter((p) => !p.executedAnywhere && !isExpired(p));
+  const resolved = cc.proposals.filter(
+    (p) => p.executedAnywhere || isExpired(p),
+  );
+
+  return (
+    <div className="space-y-6">
+      <Caption className="bg-paper-1 text-surface-grey-2 block rounded-lg px-4 py-3">
+        Democratic multi-chain registry — recipients propose and vote to add
+        (unanimous) or remove (everyone except the candidate). You sign once and
+        it counts on every chain.{" "}
+        {expiryDays !== null && `Proposals expire after ${expiryDays} days. `}
+        {isConnected &&
+          !amRecipient &&
+          "You can view proposals, but only recipients can propose or vote."}
+        {!isConnected && "Connect as a recipient to propose and vote."}
+      </Caption>
+
+      {anyDrift && (
+        <Card className="border-system-warning/40 bg-system-warning/5">
+          <Caption className="text-system-warning">
+            Recipient lists are out of sync across chains
+          </Caption>
+          <Body className="text-surface-grey mt-1 text-sm">
+            A cross-chain proposal only lands on a chain whose recipient set
+            matches the signed electorate. Sync the memberships from the Admin
+            page before proposing.
+          </Body>
+        </Card>
+      )}
+
+      <Card>
+        <Caption className="text-surface-grey-2">
+          Propose a new recipient
+        </Caption>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+          <input
+            placeholder="0x… candidate address"
+            value={newAddr}
+            disabled={!amRecipient}
+            onChange={(e) => setNewAddr(e.target.value)}
+            className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-4 py-3 font-mono text-sm outline-none disabled:opacity-50"
+          />
+          <Button
+            app="fund"
+            variant="primary"
+            leftIcon={<Plus weight="bold" />}
+            isLoading={cc.isBusy && cc.actionKind === "proposal"}
+            onClick={() =>
+              canPropose &&
+              expiresAt !== undefined &&
+              cc.propose(newAddr as Address, true, electorate, expiresAt)
+            }
+            {...(!canPropose ? { disabled: true } : {})}
+          >
+            Propose
+          </Button>
+        </div>
+        {!amRecipient && (
+          <Caption className="text-system-warning mt-2 block">
+            {isConnected
+              ? "Only current recipients can propose. You aren't a recipient of this instance yet."
+              : "Connect as a current recipient to propose new members."}
+          </Caption>
+        )}
+        {amRecipient && newAddr && !valid && (
+          <Caption className="text-system-red mt-2 block">
+            Not a valid address.
+          </Caption>
+        )}
+        {amRecipient && dup && (
+          <Caption className="text-system-warning mt-2 block">
+            Already a recipient.
+          </Caption>
+        )}
+        <Caption className="text-surface-grey mt-2 block">
+          One signature creates this proposal on every chain — adding needs all{" "}
+          {recipients.length} current recipient
+          {recipients.length === 1 ? "" : "s"} to vote (you auto-vote for your
+          own proposal). Anyone can deliver a signed proposal or vote.
+        </Caption>
+      </Card>
+
+      <div>
+        <Caption className="text-surface-grey-2 mb-3 block">
+          Active recipients ({recipients.length})
+        </Caption>
+        {recipients.length === 0 ? (
+          <EmptyState>No active recipients yet.</EmptyState>
+        ) : (
+          <div className="space-y-2">
+            {recipients.map((r) => (
+              <Card key={r} className="flex items-center justify-between py-3">
+                <a
+                  href={addressUrl(r, chainId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-text-standard hover:text-core-orange font-mono text-sm"
+                >
+                  {shortenAddress(r, 8)}
+                </a>
+                {amRecipient && address && lc(r) !== lc(address) && (
+                  <Button
+                    app="fund"
+                    variant="destructive"
+                    size="sm"
+                    leftIcon={<Trash />}
+                    isLoading={cc.isBusy && cc.actionKind === "proposal"}
+                    onClick={() =>
+                      !anyDrift &&
+                      expiresAt !== undefined &&
+                      cc.propose(r, false, electorate, expiresAt)
+                    }
+                    {...(anyDrift || expiresAt === undefined
+                      ? { disabled: true }
+                      : {})}
+                  >
+                    Propose removal
+                  </Button>
+                )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <Caption className="text-surface-grey-2 mb-3 block">
+          Open proposals ({open.length})
+        </Caption>
+        {open.length === 0 ? (
+          <EmptyState>No open proposals.</EmptyState>
+        ) : (
+          <div className="space-y-3">
+            {open.map((p) => (
+              <CrossChainProposalCard
+                key={p.proposalKey}
+                p={p}
+                amRecipient={amRecipient}
+                busy={cc.isBusy && cc.actionKind === "proposal-vote"}
+                onVote={() => cc.voteOnProposal(p.proposalKey)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <MultiChainActionStatus
+        rows={cc.rows}
+        phase={cc.phase}
+        relayDown={cc.relayDown}
+        submitting={cc.submitting}
+        payload={cc.payload}
+        onSubmitOnChain={cc.submitOnChain}
+        onRetryRelay={cc.retryRelay}
+        copy={{
+          stateLabel: proposalStateLabel,
+          aggregate: ({ counted, total, phase, relayDown }) =>
+            phase === "signing"
+              ? "Confirm in your wallet…"
+              : phase === "done" || relayDown
+                ? `Landed on ${counted} of ${total} chain${
+                    total === 1 ? "" : "s"
+                  }`
+                : `Relaying to ${total} chain${total === 1 ? "" : "s"}…`,
+          copyLabel: "Copy signed payload",
+          copyHint: "Anyone can deliver this — paste it to your community.",
+        }}
+      />
+
+      {cc.error && (
+        <Caption className="text-system-red block">{cc.error}</Caption>
+      )}
+
+      {resolved.length > 0 && (
+        <details>
+          <summary className="text-surface-grey-2 hover:text-text-standard cursor-pointer text-sm font-medium">
+            Resolved &amp; expired proposals ({resolved.length})
+          </summary>
+          <div className="mt-3 space-y-2">
+            {resolved.map((p) => (
+              <Card
+                key={p.proposalKey}
+                className="flex items-center justify-between py-2.5"
+              >
+                <a
+                  href={addressUrl(p.candidate, chainId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-surface-grey-2 font-mono text-sm"
+                >
+                  {p.isAddition ? "+" : "−"} {shortenAddress(p.candidate, 6)}
+                </a>
+                <Caption
+                  className={
+                    p.executedAnywhere
+                      ? "text-system-green"
+                      : "text-surface-grey"
+                  }
+                >
+                  {p.executedAnywhere ? "Executed" : "Expired"}
+                </Caption>
+              </Card>
+            ))}
+          </div>
+        </details>
+      )}
+
+      <Body className="text-surface-grey text-sm">
+        Proposals and votes are chain-agnostic: one signature is replayed on
+        every family chain. A proposal executes on each chain independently once
+        it reaches the vote threshold there.
+      </Body>
+    </div>
+  );
+}
+
+function CrossChainProposalCard({
+  p,
+  amRecipient,
+  busy,
+  onVote,
+}: {
+  p: CrossChainProposal;
+  amRecipient: boolean;
+  busy: boolean;
+  onVote: () => void;
+}) {
+  const chainId = useActiveChainId();
+  const pct =
+    p.requiredVotes > 0n
+      ? Number((p.voteCount * 1000n) / p.requiredVotes) / 1000
+      : 0;
+  const now = Math.floor(Date.now() / 1000);
+  const endsIn = Number(p.expiresAt) - now;
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <a
+          href={addressUrl(p.candidate, chainId)}
+          target="_blank"
+          rel="noreferrer"
+          className="font-breadDisplay text-text-standard hover:text-core-orange font-bold"
+        >
+          {shortenAddress(p.candidate, 6)}
+        </a>
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+            p.isAddition
+              ? "bg-system-green/10 text-system-green"
+              : "bg-system-red/10 text-system-red"
+          }`}
+        >
+          {p.isAddition ? "Add" : "Remove"}
+        </span>
+      </div>
+      <div className="mt-3 flex items-center justify-between text-sm">
+        <span className="text-text-standard font-semibold">
+          {p.voteCount.toString()} / {p.requiredVotes.toString()} votes
+        </span>
+        <Caption className="text-surface-grey-2">
+          {endsIn > 0 ? `${Math.ceil(endsIn / 86400)}d left` : "expired"}
+        </Caption>
+      </div>
+      <div className="mt-2">
+        <ProgressBar value={Math.min(1, pct)} />
+      </div>
+
+      {/* Per-chain landing status. */}
+      <ul className="mt-3 space-y-1">
+        {p.perChain.map((c) => (
+          <li
+            key={c.chainId}
+            className="text-surface-grey-2 flex items-center justify-between text-xs"
+          >
+            <span>{shortChainName(c.chainId)}</span>
+            <span>
+              {!c.exists
+                ? "not delivered yet"
+                : c.executed
+                  ? "executed"
+                  : `${c.voteCount.toString()}/${c.requiredVotes.toString()} votes`}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-3">
+        {p.votedHere ? (
+          <Caption className="text-system-green flex items-center gap-1">
+            <CheckCircle weight="fill" size={16} /> You voted
+          </Caption>
+        ) : !amRecipient ? (
+          <Caption className="text-surface-grey">
+            Only recipients can vote.
+          </Caption>
+        ) : !p.eligibleHere ? (
+          <Caption className="text-surface-grey">
+            Not eligible — you joined after this proposal.
+          </Caption>
+        ) : (
+          <Button
+            app="fund"
+            variant="primary"
+            size="sm"
+            isLoading={busy}
+            onClick={onVote}
+          >
+            Vote
+          </Button>
+        )}
+      </div>
     </Card>
   );
 }

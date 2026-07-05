@@ -98,4 +98,14 @@ export class Families {
     const res = await this.resolveChain(familyId, chainId);
     return res.status === "found" ? res.instance.votingModule : null;
   }
+
+  /** The full resolved instance for a family on one chain, or null. The worker
+   *  derives the per-kind target (votingModule vs registry) from it. */
+  async instance(
+    familyId: Hex,
+    chainId: number,
+  ): Promise<FamilyInstance | null> {
+    const res = await this.resolveChain(familyId, chainId);
+    return res.status === "found" ? res.instance : null;
+  }
 }

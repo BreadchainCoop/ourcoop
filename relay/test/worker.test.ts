@@ -2,26 +2,46 @@ import type { Address, Hex } from "viem";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   RevertError,
-  type CastVoteArgs,
   type ChainAccess,
+  type CrossChainProposalView,
+  type DeliveryArgs,
   type FeeEstimate,
   type Receipt,
 } from "../src/chain-access.js";
 import { GasBudget, dayKey } from "../src/gas-budget.js";
 import { NonceManager } from "../src/nonce-manager.js";
-import { Store, type JobState } from "../src/store.js";
+import {
+  Store,
+  type FamilyInstance,
+  type JobState,
+  type NewAction,
+} from "../src/store.js";
 import { ChainWorker } from "../src/worker.js";
 
 const CHAIN = 100;
 const familyId = ("0x" + "ab".repeat(32)) as Hex;
 const voter = "0x1111111111111111111111111111111111111111" as Address;
 const votingModule = "0x0000000000000000000000000000000000000011" as Address;
+const registry = "0x0000000000000000000000000000000000000012" as Address;
 const FAR_DEADLINE = "4102444800"; // year 2100
 const NOW = 1_700_000_000_000; // fixed clock (ms)
+const proposalKey = ("0x" + "cd".repeat(32)) as Hex;
+
+const INSTANCE: FamilyInstance = {
+  cycleModule: "0x000000000000000000000000000000000000000a" as Address,
+  registry,
+  token: "0x000000000000000000000000000000000000000c" as Address,
+  votingPowerStrategy: "0x000000000000000000000000000000000000000d" as Address,
+  distributionManager: "0x000000000000000000000000000000000000000e" as Address,
+  distributionStrategy: "0x000000000000000000000000000000000000000f" as Address,
+  secondaryDistributionStrategy:
+    "0x0000000000000000000000000000000000000010" as Address,
+  votingModule,
+};
 
 /**
  * Fake ChainAccess: every call is a knob so the worker's state machine
- * (spec section 3 / B.4) can be exercised without a chain.
+ * (spec section 3 / B.4) can be exercised per kind without a chain.
  */
 class FakeAccess implements ChainAccess {
   head = 1000n;
@@ -29,6 +49,11 @@ class FakeAccess implements ChainAccess {
   pendingCount = 0;
   lastNonce = 0n;
   votingPower = 100n;
+  // registry knobs
+  registryNonce = 0n;
+  recipients: Address[] = [];
+  proposal: CrossChainProposalView | undefined = undefined;
+  voted = false;
   simulateGas: bigint | RevertError = 21_000n;
   sendResult: Hex | RevertError | Error = ("0x" + "aa".repeat(32)) as Hex;
   receipt: Receipt | null = null;
@@ -37,6 +62,8 @@ class FakeAccess implements ChainAccess {
     maxPriorityFeePerGas: 1n,
   };
   sends = 0;
+  /** DeliveryArgs each send was called with — tests assert kind dispatch. */
+  sent: DeliveryArgs[] = [];
   /** Fees each send was submitted with — lets tests assert the reaper's cap. */
   sentFees: FeeEstimate[] = [];
 
@@ -61,17 +88,30 @@ class FakeAccess implements ChainAccess {
   getVotingPower(): Promise<bigint> {
     return Promise.resolve(this.votingPower);
   }
-  simulateCastVote(): Promise<bigint> {
+  lastRegistryUpdateNonce(): Promise<bigint> {
+    return Promise.resolve(this.registryNonce);
+  }
+  getRecipients(): Promise<Address[]> {
+    return Promise.resolve(this.recipients);
+  }
+  getCrossChainProposal(): Promise<CrossChainProposalView | undefined> {
+    return Promise.resolve(this.proposal);
+  }
+  hasVotedCrossChain(): Promise<boolean> {
+    return Promise.resolve(this.voted);
+  }
+  simulate(): Promise<bigint> {
     if (this.simulateGas instanceof RevertError)
       return Promise.reject(this.simulateGas);
     return Promise.resolve(this.simulateGas);
   }
-  sendCastVote(
-    _m: Address,
-    _a: CastVoteArgs,
+  send(
+    _target: Address,
+    delivery: DeliveryArgs,
     opts: { nonce: number; gas: bigint } & FeeEstimate,
   ): Promise<Hex> {
     this.sends++;
+    this.sent.push(delivery);
     this.sentFees.push({
       maxFeePerGas: opts.maxFeePerGas,
       maxPriorityFeePerGas: opts.maxPriorityFeePerGas,
@@ -90,7 +130,7 @@ class FakeAccess implements ChainAccess {
 
 function makeWorker(
   access: FakeAccess,
-  module: Address | null = votingModule,
+  instance: FamilyInstance | null = INSTANCE,
   opts: {
     budgetWei?: bigint;
     now?: () => number;
@@ -109,14 +149,14 @@ function makeWorker(
     access,
     nonces: new NonceManager(() => access.getPendingTransactionCount()),
     gasBudget,
-    resolveVotingModule: () => Promise.resolve(module),
+    resolveInstance: () => Promise.resolve(instance),
     now: opts.now ?? (() => NOW),
     timings: opts.timings,
   });
   return { store, worker, gasBudget };
 }
 
-function enqueue(
+function enqueueVote(
   store: Store,
   overrides: Partial<{ nonce: string; deadline: string }> = {},
 ) {
@@ -136,6 +176,12 @@ function enqueue(
   return id;
 }
 
+function enqueue(store: Store, action: NewAction) {
+  const { id } = store.upsertAction(action);
+  store.ensureJob(id, CHAIN, NOW - 1);
+  return id;
+}
+
 function stateOf(store: Store, id: number): JobState | undefined {
   return store.getJob(id, CHAIN)?.state;
 }
@@ -148,12 +194,14 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("pending -> submitted -> confirmed on the happy path", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store);
+    const id = enqueueVote(store);
 
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("submitted");
     expect(store.getJob(id, CHAIN)?.txHash).toBe(access.sendResult);
     expect(store.getJob(id, CHAIN)?.acctNonce).toBe(0);
+    // Delivered as a vote to the voting module.
+    expect(access.sent[0]?.kind).toBe("vote");
 
     access.receipt = {
       status: "success",
@@ -167,7 +215,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("expired: deadline in the past -> terminal expired, never sends", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store, {
+    const id = enqueueVote(store, {
       deadline: String(Math.floor(NOW / 1000) - 10),
     });
     await worker.runOnce();
@@ -177,7 +225,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("superseded: a newer nonce already landed -> success-class, never sends", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store, { nonce: "5" });
+    const id = enqueueVote(store, { nonce: "5" });
     access.lastNonce = 7n; // a later ballot landed here
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("superseded");
@@ -186,7 +234,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("skipped_no_power: zero power -> re-queued with backoff while deadline valid", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store);
+    const id = enqueueVote(store);
     access.votingPower = 0n;
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("skipped_no_power");
@@ -199,7 +247,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("StaleNonce revert on simulate -> superseded (success-class)", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store);
+    const id = enqueueVote(store);
     access.simulateGas = new RevertError("StaleNonce");
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("superseded");
@@ -208,7 +256,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("RecipientSetMismatch revert -> recipient_mismatch, retryable with long backoff", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store);
+    const id = enqueueVote(store);
     access.simulateGas = new RevertError("RecipientSetMismatch");
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("recipient_mismatch");
@@ -219,7 +267,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("unknown revert -> failed (terminal) with the decoded error name", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store);
+    const id = enqueueVote(store);
     access.simulateGas = new RevertError("SomethingElse");
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("failed");
@@ -229,7 +277,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("reverted receipt with a since-advanced nonce -> superseded, not failed", async () => {
     const { store, worker } = makeWorker(access);
-    const id = enqueue(store, { nonce: "5" });
+    const id = enqueueVote(store, { nonce: "5" });
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("submitted");
     // The tx mined reverted, but lastCrossChainNonce shows our nonce landed
@@ -247,7 +295,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("family unresolvable on this chain -> deferred, stays pending, never dropped", async () => {
     const { store, worker } = makeWorker(access, null);
-    const id = enqueue(store);
+    const id = enqueueVote(store);
     await worker.runOnce();
     expect(stateOf(store, id)).toBe("pending");
     expect(store.getJob(id, CHAIN)?.lastError).toContain("deferred");
@@ -260,7 +308,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
     // Happy path leaves a reservation on the day's spend.
     const okAccess = new FakeAccess();
     const ok = makeWorker(okAccess);
-    enqueue(ok.store);
+    enqueueVote(ok.store);
     await ok.worker.runOnce();
     expect(ok.store.gasSpend(CHAIN, day)).toBeGreaterThan(0n);
 
@@ -270,8 +318,8 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
     let clock = NOW;
     const failAccess = new FakeAccess();
     failAccess.sendResult = new Error("connection reset");
-    const fail = makeWorker(failAccess, votingModule, { now: () => clock });
-    const id = enqueue(fail.store);
+    const fail = makeWorker(failAccess, INSTANCE, { now: () => clock });
+    const id = enqueueVote(fail.store);
     for (let i = 0; i < 3; i++) {
       await expect(fail.worker.runOnce()).rejects.toThrow("connection reset");
       clock += 30 * 60_000; // past any exponential backoff
@@ -285,7 +333,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("stuck-tx reaper: reserves budget, caps fees, and rate-limits rebroadcasts", async () => {
     let clock = NOW;
-    const { store, worker } = makeWorker(access, votingModule, {
+    const { store, worker } = makeWorker(access, INSTANCE, {
       now: () => clock,
       timings: {
         stuckBlocks: 10n,
@@ -293,7 +341,7 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
         maxRebroadcastFeeMultiple: 3n,
       },
     });
-    const id = enqueue(store);
+    const id = enqueueVote(store);
 
     // Submit: nonce 0, low fee cap, submittedBlock = head (1000).
     access.fees = { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1n };
@@ -339,12 +387,12 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
   it("stuck-tx reaper defers (no send) when the daily gas budget is exhausted", async () => {
     let clock = NOW;
     // Budget large enough for the first submit, too small for a rebroadcast.
-    const { store, worker } = makeWorker(access, votingModule, {
+    const { store, worker } = makeWorker(access, INSTANCE, {
       now: () => clock,
       budgetWei: ((21_000n * 120n) / 100n) * 1_000_000_000n, // ~ one send
       timings: { stuckBlocks: 10n, rebroadcastMinIntervalMs: 60_000 },
     });
-    const id = enqueue(store);
+    const id = enqueueVote(store);
     await worker.runOnce();
     expect(access.sends).toBe(1);
 
@@ -359,11 +407,11 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
 
   it("stuck-tx reaper: reaps a tx whose submittedBlock is null (dropped post-send)", async () => {
     let clock = NOW;
-    const { store, worker } = makeWorker(access, votingModule, {
+    const { store, worker } = makeWorker(access, INSTANCE, {
       now: () => clock,
       timings: { stuckBlocks: 10n, rebroadcastMinIntervalMs: 60_000 },
     });
-    const { id: voteId } = store.upsertVote({
+    const { id: actionId } = store.upsertVote({
       familyId,
       voter,
       nonce: "5",
@@ -375,10 +423,10 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
       ] as Address[],
       signature: ("0x" + "11".repeat(65)) as Hex,
     });
-    store.ensureJob(voteId, CHAIN, NOW - 1);
+    store.ensureJob(actionId, CHAIN, NOW - 1);
     // A submitted job whose post-send getBlockNumber failed: submittedBlock null.
     store.updateJob(
-      voteId,
+      actionId,
       CHAIN,
       {
         state: "submitted",
@@ -397,6 +445,225 @@ describe("ChainWorker state machine (spec section 3 / B.4)", () => {
     await worker.runOnce();
     // The dropped tx was rebroadcast instead of being wedged forever.
     expect(access.sends).toBe(1);
-    expect(store.getJob(voteId, CHAIN)?.submittedBlock).not.toBeNull();
+    expect(store.getJob(actionId, CHAIN)?.submittedBlock).not.toBeNull();
+  });
+});
+
+describe("ChainWorker per-kind skip-checks & revert classification", () => {
+  let access: FakeAccess;
+  beforeEach(() => {
+    access = new FakeAccess();
+  });
+
+  function registryUpdate(nonce = "5"): NewAction {
+    return {
+      kind: "registry-update",
+      familyId,
+      admin: voter,
+      recipients: ["0x1111111111111111111111111111111111111111"] as Address[],
+      nonce,
+      deadline: FAR_DEADLINE,
+      signature: ("0x" + "22".repeat(65)) as Hex,
+    };
+  }
+  function proposal(): NewAction {
+    return {
+      kind: "proposal",
+      familyId,
+      proposer: voter,
+      candidate: "0x3333333333333333333333333333333333333333" as Address,
+      isAddition: true,
+      electorate: ["0x1111111111111111111111111111111111111111"] as Address[],
+      expiresAt: FAR_DEADLINE,
+      nonce: "1",
+      proposalKey,
+      signature: ("0x" + "44".repeat(65)) as Hex,
+    };
+  }
+  function proposalVote(): NewAction {
+    return {
+      kind: "proposal-vote",
+      familyId,
+      voter,
+      proposalKey,
+      deadline: FAR_DEADLINE,
+      signature: ("0x" + "55".repeat(65)) as Hex,
+    };
+  }
+  const liveProposal: CrossChainProposalView = {
+    candidate: "0x3333333333333333333333333333333333333333" as Address,
+    isAddition: true,
+    executed: false,
+    expiresAt: BigInt(FAR_DEADLINE),
+    voteCount: 1n,
+    requiredVotes: 3n,
+  };
+
+  // ── registry-update ──
+  it("registry-update: delivers to the REGISTRY (not the voting module)", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, registryUpdate("5"));
+    access.registryNonce = 4n; // signed nonce 5 > 4 -> deliver
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("submitted");
+    expect(access.sends).toBe(1);
+    expect(access.sent[0]?.kind).toBe("registry-update");
+  });
+
+  it("registry-update: on-chain nonce >= signed -> superseded (nonce burned), never sends", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, registryUpdate("5"));
+    access.registryNonce = 5n; // equal -> already burned
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("superseded");
+    expect(access.sends).toBe(0);
+  });
+
+  it("registry-update: delivers even when the set already matches (no skip)", async () => {
+    // The worker does NOT read/compare recipients — applying burns the nonce,
+    // which kills older floating signatures, so an already-equal set still ships.
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, registryUpdate("5"));
+    access.registryNonce = 4n;
+    access.recipients = [
+      "0x1111111111111111111111111111111111111111",
+    ] as Address[]; // equal to signed
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("submitted");
+    expect(access.sends).toBe(1);
+  });
+
+  it("registry-update: StaleNonce revert -> superseded", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, registryUpdate("5"));
+    access.registryNonce = 4n;
+    access.simulateGas = new RevertError("StaleNonce");
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("superseded");
+  });
+
+  // ── proposal ──
+  it("proposal: delivers to the registry when the key is absent", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposal());
+    access.proposal = undefined; // not on-chain yet
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("submitted");
+    expect(access.sent[0]?.kind).toBe("proposal");
+  });
+
+  it("proposal: already exists on-chain -> confirmed, never sends", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposal());
+    access.proposal = liveProposal;
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("confirmed");
+    expect(access.sends).toBe(0);
+  });
+
+  it("proposal: ProposalAlreadyExists revert -> superseded", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposal());
+    access.proposal = undefined;
+    access.simulateGas = new RevertError("ProposalAlreadyExists");
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("superseded");
+  });
+
+  it("proposal: RecipientSetMismatch revert -> recipient_mismatch, long backoff", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposal());
+    access.proposal = undefined;
+    access.simulateGas = new RevertError("RecipientSetMismatch");
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("recipient_mismatch");
+    const job = store.getJob(id, CHAIN);
+    expect(job?.notBefore).toBeGreaterThan(NOW);
+  });
+
+  // ── proposal-vote ──
+  it("proposal-vote: proposal NOT found on-chain -> DEFER (never terminal)", async () => {
+    // The creation job may not have landed yet — a missing proposal is not a
+    // permanent failure. Stays pending with backoff so it retries.
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposalVote());
+    access.proposal = undefined;
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("pending");
+    expect(access.sends).toBe(0);
+    const job = store.getJob(id, CHAIN);
+    expect(job?.lastError).toContain("deferred");
+    expect(job?.notBefore).toBeGreaterThan(NOW);
+    // Retryable once the backoff elapses (proposal may have landed by then).
+    expect(store.dueJobs(CHAIN, job!.notBefore + 1)).toHaveLength(1);
+  });
+
+  it("proposal-vote: delivers to the registry once the proposal exists", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposalVote());
+    access.proposal = liveProposal;
+    access.voted = false;
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("submitted");
+    expect(access.sent[0]?.kind).toBe("proposal-vote");
+  });
+
+  it("proposal-vote: already voted here -> superseded, never sends", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposalVote());
+    access.proposal = liveProposal;
+    access.voted = true;
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("superseded");
+    expect(access.sends).toBe(0);
+  });
+
+  it("proposal-vote: proposal already executed -> superseded, never sends", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposalVote());
+    access.proposal = { ...liveProposal, executed: true };
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("superseded");
+    expect(access.sends).toBe(0);
+  });
+
+  it("proposal-vote: AlreadyVoted revert -> superseded", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposalVote());
+    access.proposal = liveProposal;
+    access.voted = false;
+    access.simulateGas = new RevertError("AlreadyVoted");
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("superseded");
+  });
+
+  it("proposal-vote: ProposalNotFound revert (race) -> DEFER, never terminal", async () => {
+    const { store, worker } = makeWorker(access);
+    const id = enqueue(store, proposalVote());
+    // Skip-check passes (proposal present), but the tx races a re-org / late
+    // read and reverts ProposalNotFound — must defer, not fail.
+    access.proposal = liveProposal;
+    access.voted = false;
+    access.simulateGas = new RevertError("ProposalNotFound");
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("pending");
+    expect(store.getJob(id, CHAIN)?.lastError).toContain("deferred");
+  });
+
+  it("proposal-vote: absolute expiresAt in the past on the PROPOSAL is bounded by deadline", async () => {
+    // A proposal-vote carries only a deadline; a past deadline is expired.
+    const { store, worker } = makeWorker(access);
+    const { id } = store.upsertAction({
+      kind: "proposal-vote",
+      familyId,
+      voter,
+      proposalKey,
+      deadline: String(Math.floor(NOW / 1000) - 10),
+      signature: ("0x" + "55".repeat(65)) as Hex,
+    });
+    store.ensureJob(id, CHAIN, NOW - 1);
+    await worker.runOnce();
+    expect(stateOf(store, id)).toBe("expired");
+    expect(access.sends).toBe(0);
   });
 });

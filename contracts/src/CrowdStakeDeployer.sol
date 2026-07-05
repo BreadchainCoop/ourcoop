@@ -169,6 +169,33 @@ contract CrowdStakeDeployer {
         );
     }
 
+    /// @notice The familyId for a Voting-kind cross-chain deploy — commits the founding cohort.
+    /// @dev A democratic family MUST commit its initialRecipients and proposalExpiry: same
+    ///      creator/salt with different founders on two chains would otherwise mint one family
+    ///      with permanently drifted electorates and no heal path. Folds the base familyIdOf with
+    ///      keccak256(abi.encodePacked(initialRecipients)) and proposalExpiry. Admin-kind stays on
+    ///      the base familyIdOf (byte-identical to today).
+    function votingFamilyIdOf(
+        address creator,
+        bytes32 salt,
+        string memory tokenName,
+        string memory tokenSymbol,
+        uint256 maxVotingPoints,
+        uint8 distributionKind,
+        address[] memory initialRecipients,
+        uint256 proposalExpiry
+    ) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                familyIdOf(
+                    creator, salt, tokenName, tokenSymbol, maxVotingPoints, uint8(RegistryKind.Voting), distributionKind
+                ),
+                keccak256(abi.encodePacked(initialRecipients)),
+                proposalExpiry
+            )
+        );
+    }
+
     /// @notice Deploy a full, working CrowdStake instance in one transaction.
     function deploy(Params calldata p) external returns (Instance memory inst) {
         if (p.owner == address(0)) revert ZeroOwner();
@@ -184,9 +211,30 @@ contract CrowdStakeDeployer {
 
         bytes32 familyId;
         if (p.crossChain) {
-            familyId = familyIdOf(
-                msg.sender, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
-            );
+            // Voting-kind families commit their founding cohort + expiry; admin-kind stays on the
+            // base derivation (byte-identical to today).
+            if (p.registryKind == uint8(RegistryKind.Voting)) {
+                familyId = votingFamilyIdOf(
+                    msg.sender,
+                    p.salt,
+                    p.tokenName,
+                    p.tokenSymbol,
+                    p.maxVotingPoints,
+                    p.distributionKind,
+                    p.initialRecipients,
+                    p.proposalExpiry
+                );
+            } else {
+                familyId = familyIdOf(
+                    msg.sender,
+                    p.salt,
+                    p.tokenName,
+                    p.tokenSymbol,
+                    p.maxVotingPoints,
+                    p.registryKind,
+                    p.distributionKind
+                );
+            }
             if (familyInstances[familyId].votingModule != address(0)) revert FamilyAlreadyDeployed();
         }
 
@@ -200,19 +248,25 @@ contract CrowdStakeDeployer {
             keccak256(abi.encodePacked(baseSalt, "cycle"))
         );
 
-        // 2. Recipient registry — admin-controlled or democratic.
+        // 2. Recipient registry — admin-controlled or democratic. familyId (0 when !crossChain)
+        //    is threaded in so family instances accept the chain-agnostic governance signatures.
+        //    encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
         if (p.registryKind == uint8(RegistryKind.Voting)) {
             inst.registry = FACTORY.create(
                 VOTING_REGISTRY_BEACON,
-                abi.encodeWithSelector(
-                    VotingRecipientRegistry.initialize.selector, p.owner, p.initialRecipients, p.proposalExpiry
+                abi.encodeWithSignature(
+                    "initialize(address,address[],uint256,bytes32)",
+                    p.owner,
+                    p.initialRecipients,
+                    p.proposalExpiry,
+                    familyId
                 ),
                 keccak256(abi.encodePacked(baseSalt, "registry"))
             );
         } else {
             inst.registry = FACTORY.create(
                 REGISTRY_BEACON,
-                abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, p.owner),
+                abi.encodeWithSignature("initialize(address,bytes32)", p.owner, familyId),
                 keccak256(abi.encodePacked(baseSalt, "registry"))
             );
         }

@@ -1,5 +1,20 @@
 import type { Address, Hex } from "viem";
-import type { SignedVotePayload } from "@/lib/vote-signature";
+import type {
+  SignedProposalPayload,
+  SignedProposalVotePayload,
+  SignedRegistryUpdatePayload,
+  SignedVotePayload,
+} from "@/lib/vote-signature";
+
+/** Every kind the generic /v1/action endpoint accepts (relay ActionKind). */
+export type ActionKind =
+  "vote" | "registry-update" | "proposal" | "proposal-vote";
+
+/** The signed body for any registry-governance action (POST /v1/action). */
+export type SignedActionPayload =
+  | SignedRegistryUpdatePayload
+  | SignedProposalPayload
+  | SignedProposalVotePayload;
 
 /**
  * Thin client for the vote relay's HTTP API. Multiple relays can be
@@ -37,6 +52,8 @@ export type RelayJobState =
 
 export interface RelayChainStatus {
   chainId: number;
+  /** The delivery target (votingModule for votes, registry for the rest). */
+  target?: Address;
   votingModule?: Address;
   state: RelayJobState;
   txHash?: Hex;
@@ -133,6 +150,39 @@ export function getVoteStatus(
     nonce: nonce.toString(),
   });
   return fanOut(`/v1/vote-status?${q}`);
+}
+
+/**
+ * POST any registry-governance action (registry-update / proposal /
+ * proposal-vote) to every relay. Same advisory contract as postVote: the relay
+ * can censor, never forge — settlement is always confirmed by on-chain reads.
+ * null → no relay reachable (callers fall back to wallet self-submission).
+ */
+export function postAction(
+  payload: SignedActionPayload,
+): Promise<RelayVoteStatus | null> {
+  if (!relayConfigured()) return Promise.resolve(null);
+  return fanOut("/v1/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Advisory delivery status for a registry-governance action, keyed by the
+ * per-kind dedup key (nonce for registry-update, proposalKey for proposal /
+ * proposal-vote). null → no relay reachable.
+ */
+export function getActionStatus(
+  familyId: Hex,
+  kind: ActionKind,
+  signer: Address,
+  dedupKey: string,
+): Promise<RelayVoteStatus | null> {
+  if (!relayConfigured()) return Promise.resolve(null);
+  const q = new URLSearchParams({ familyId, kind, signer, dedupKey });
+  return fanOut(`/v1/action-status?${q}`);
 }
 
 export interface RelayHealth {

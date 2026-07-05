@@ -1,5 +1,33 @@
 export const recipientRegistryAbi = [
   { type: "constructor", inputs: [], stateMutability: "nonpayable" },
+  // ── cross-chain family governance (AdminRecipientRegistry) ──
+  {
+    type: "function",
+    name: "familyId",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32", internalType: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "lastRegistryUpdateNonce",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "applyCrossChainRegistryUpdate",
+    inputs: [
+      { name: "admin", type: "address", internalType: "address" },
+      { name: "recipients", type: "address[]", internalType: "address[]" },
+      { name: "nonce", type: "uint256", internalType: "uint256" },
+      { name: "deadline", type: "uint256", internalType: "uint256" },
+      { name: "signature", type: "bytes", internalType: "bytes" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
   {
     type: "function",
     name: "clearAdditionQueue",
@@ -194,6 +222,43 @@ export const recipientRegistryAbi = [
   },
   {
     type: "event",
+    name: "CrossChainRegistryUpdated",
+    inputs: [
+      {
+        name: "admin",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "recipients",
+        type: "address[]",
+        indexed: false,
+        internalType: "address[]",
+      },
+      {
+        name: "nonce",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "deadline",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "signature",
+        type: "bytes",
+        indexed: false,
+        internalType: "bytes",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
     name: "Initialized",
     inputs: [
       {
@@ -294,10 +359,18 @@ export const recipientRegistryAbi = [
     ],
     anonymous: false,
   },
+  // ── shared cross-chain errors (CrossChainRegistryBase) ──
+  { type: "error", name: "CrossChainNotEnabled", inputs: [] },
+  { type: "error", name: "CrossChainOnly", inputs: [] },
   { type: "error", name: "InvalidInitialization", inputs: [] },
   { type: "error", name: "InvalidRecipient", inputs: [] },
+  { type: "error", name: "InvalidSignature", inputs: [] },
   { type: "error", name: "MaxQueueSizeReached", inputs: [] },
+  { type: "error", name: "NotAscending", inputs: [] },
   { type: "error", name: "NotInitializing", inputs: [] },
+  { type: "error", name: "RecipientSetMismatch", inputs: [] },
+  { type: "error", name: "SignatureExpired", inputs: [] },
+  { type: "error", name: "StaleNonce", inputs: [] },
   {
     type: "error",
     name: "OwnableInvalidOwner",

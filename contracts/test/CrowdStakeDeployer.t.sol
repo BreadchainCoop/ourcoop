@@ -23,6 +23,11 @@ interface IOwnable {
     function owner() external view returns (address);
 }
 
+interface IFamilyId {
+    function familyId() external view returns (bytes32);
+    function lastRegistryUpdateNonce() external view returns (uint256);
+}
+
 contract CrowdStakeDeployerTest is Test {
     CrowdStakeDeployer internal deployer;
 
@@ -340,5 +345,98 @@ contract CrowdStakeDeployerTest is Test {
         vm.prank(FOUNDER);
         vm.expectRevert(CrowdStakeDeployer.FamilyAlreadyDeployed.selector);
         deployer.deploy(p);
+    }
+
+    // ---- Registry familyId wiring ----
+
+    /// @dev An admin cross-chain deploy uses the base familyIdOf (byte-identical to today) and
+    ///      wires it into the registry, which now exposes familyId() + lastRegistryUpdateNonce().
+    function test_CrossChainAdminDeploy_WiresRegistryFamilyId() public {
+        CrowdStakeDeployer.Params memory p = _adminParams("xchain-admin");
+        p.crossChain = true;
+        bytes32 familyId = deployer.familyIdOf(
+            FOUNDER, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
+        );
+
+        vm.prank(FOUNDER);
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(IFamilyId(i.registry).familyId(), familyId, "registry familyId = base familyIdOf");
+        assertEq(IFamilyId(i.registry).lastRegistryUpdateNonce(), 0, "fresh update nonce");
+        assertEq(BasisPointsVotingModule(i.votingModule).familyId(), familyId, "module familyId matches registry");
+    }
+
+    /// @dev A classic admin deploy leaves the registry familyId zero.
+    function test_ClassicAdminDeploy_RegistryFamilyIdZero() public {
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(_adminParams("classic-admin"));
+        assertEq(IFamilyId(i.registry).familyId(), bytes32(0), "classic registry familyId 0");
+    }
+
+    // ---- votingFamilyIdOf: commits founders + expiry ----
+
+    /// @dev votingFamilyIdOf folds the base familyIdOf with the founding cohort + expiry.
+    function test_VotingFamilyIdOf_CommitsFoundersAndExpiry() public view {
+        address[] memory founders = new address[](2);
+        founders[0] = address(0x1111);
+        founders[1] = address(0x2222);
+        bytes32 salt = "vfid";
+
+        bytes32 base = deployer.familyIdOf(FOUNDER, salt, "Demo Stake", "DEMO", 10_000, 1, 0);
+        bytes32 expected = keccak256(abi.encode(base, keccak256(abi.encodePacked(founders)), uint256(7 days)));
+
+        assertEq(
+            deployer.votingFamilyIdOf(FOUNDER, salt, "Demo Stake", "DEMO", 10_000, 0, founders, 7 days),
+            expected,
+            "votingFamilyIdOf derivation"
+        );
+
+        // Different founders → different family (the critical drift-prevention property).
+        address[] memory other = new address[](2);
+        other[0] = address(0x1111);
+        other[1] = address(0x3333);
+        assertTrue(
+            deployer.votingFamilyIdOf(FOUNDER, salt, "Demo Stake", "DEMO", 10_000, 0, other, 7 days) != expected,
+            "founder change -> different family"
+        );
+
+        // Different expiry → different family.
+        assertTrue(
+            deployer.votingFamilyIdOf(FOUNDER, salt, "Demo Stake", "DEMO", 10_000, 0, founders, 8 days) != expected,
+            "expiry change -> different family"
+        );
+    }
+
+    /// @dev A voting cross-chain deploy wires votingFamilyIdOf (not the base id) into both the
+    ///      registry and voting module, and records the sibling under that id.
+    function test_CrossChainVotingDeploy_WiresVotingFamilyId() public {
+        address[] memory founders = new address[](1);
+        founders[0] = FOUNDER;
+        CrowdStakeDeployer.Params memory p = _votingParams("xchain-voting", founders, 7 days);
+        p.crossChain = true;
+
+        bytes32 votingFamilyId = deployer.votingFamilyIdOf(
+            FOUNDER,
+            p.salt,
+            p.tokenName,
+            p.tokenSymbol,
+            p.maxVotingPoints,
+            p.distributionKind,
+            founders,
+            p.proposalExpiry
+        );
+        bytes32 baseFamilyId = deployer.familyIdOf(
+            FOUNDER, p.salt, p.tokenName, p.tokenSymbol, p.maxVotingPoints, p.registryKind, p.distributionKind
+        );
+        assertTrue(votingFamilyId != baseFamilyId, "voting-kind id diverges from base id");
+
+        vm.prank(FOUNDER);
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(IFamilyId(i.registry).familyId(), votingFamilyId, "registry uses votingFamilyIdOf");
+        assertEq(BasisPointsVotingModule(i.votingModule).familyId(), votingFamilyId, "module uses votingFamilyIdOf");
+
+        // Sibling recorded under the voting-kind id.
+        (,,,,,,, address votingModule) = deployer.familyInstances(votingFamilyId);
+        assertEq(votingModule, i.votingModule, "sibling recorded under voting-kind id");
     }
 }

@@ -194,7 +194,7 @@ contract Deploy is Script {
         // 2. AdminRecipientRegistry
         registry = factory.create(
             adminRegistryBeacon,
-            abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, p.owner),
+            abi.encodeWithSignature("initialize(address)", p.owner),
             keccak256(abi.encodePacked(baseSalt, "registry"))
         );
 

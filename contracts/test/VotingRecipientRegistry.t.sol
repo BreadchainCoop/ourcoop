@@ -30,7 +30,8 @@ contract VotingRecipientRegistryTest is TestWrapper {
         initial[1] = RECIPIENT_2;
         initial[2] = RECIPIENT_3;
 
-        bytes memory initData = abi.encodeCall(VotingRecipientRegistry.initialize, (ADMIN, initial, 7 days));
+        bytes memory initData =
+            abi.encodeWithSignature("initialize(address,address[],uint256)", ADMIN, initial, uint256(7 days));
         registry = VotingRecipientRegistry(address(new ERC1967Proxy(address(impl), initData)));
     }
 
@@ -326,7 +327,8 @@ contract VotingRecipientRegistryTest is TestWrapper {
         // it should revert with NoRecipients
         VotingRecipientRegistry impl = new VotingRecipientRegistry();
         address[] memory empty = new address[](0);
-        bytes memory initData = abi.encodeCall(VotingRecipientRegistry.initialize, (ADMIN, empty, 7 days));
+        bytes memory initData =
+            abi.encodeWithSignature("initialize(address,address[],uint256)", ADMIN, empty, uint256(7 days));
 
         vm.expectRevert(VotingRecipientRegistry.NoRecipients.selector);
         new ERC1967Proxy(address(impl), initData);
@@ -354,7 +356,8 @@ contract VotingRecipientRegistryTest is TestWrapper {
         VotingRecipientRegistry impl = new VotingRecipientRegistry();
         address[] memory initial = new address[](1);
         initial[0] = RECIPIENT_1;
-        bytes memory initData = abi.encodeCall(VotingRecipientRegistry.initialize, (ADMIN, initial, 0));
+        bytes memory initData =
+            abi.encodeWithSignature("initialize(address,address[],uint256)", ADMIN, initial, uint256(0));
 
         vm.expectRevert(VotingRecipientRegistry.InvalidProposalExpiry.selector);
         new ERC1967Proxy(address(impl), initData);

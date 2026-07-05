@@ -1,6 +1,6 @@
 import type { Address, Hex } from "viem";
 import { errorMessage, log, warn } from "./log.js";
-import type { Store } from "./store.js";
+import type { NewAction, Store } from "./store.js";
 
 /** Split [from..to] into inclusive windows of at most `max` blocks. */
 export function planWindows(
@@ -64,6 +64,48 @@ export interface VoteCastLog {
   signature: Hex;
 }
 
+export interface RegistryUpdatedLog {
+  kind: "registry-update";
+  txHash: Hex;
+  logIndex: number;
+  registry: Address;
+  admin: Address;
+  recipients: Address[];
+  nonce: bigint;
+  deadline: bigint;
+  signature: Hex;
+}
+
+export interface ProposalCreatedLog {
+  kind: "proposal";
+  txHash: Hex;
+  logIndex: number;
+  registry: Address;
+  proposalKey: Hex;
+  proposer: Address;
+  candidate: Address;
+  isAddition: boolean;
+  electorate: Address[];
+  expiresAt: bigint;
+  nonce: bigint;
+  signature: Hex;
+}
+
+export interface ProposalVoteCastLog {
+  kind: "proposal-vote";
+  txHash: Hex;
+  logIndex: number;
+  registry: Address;
+  proposalKey: Hex;
+  voter: Address;
+  deadline: bigint;
+  signature: Hex;
+}
+
+/** Any of the three registry-governance events, discriminated by kind. */
+export type RegistryLog =
+  RegistryUpdatedLog | ProposalCreatedLog | ProposalVoteCastLog;
+
 /** The chain surface the listener needs; production wraps viem getLogs. */
 export interface ListenerRpc {
   getBlockNumber(): Promise<bigint>;
@@ -73,7 +115,14 @@ export interface ListenerRpc {
     from: bigint,
     to: bigint,
   ): Promise<VoteCastLog[]>;
-  readFamilyId(votingModule: Address): Promise<Hex>;
+  /** The three CrossChain* registry events across the given registry addresses. */
+  getRegistryLogs(
+    addresses: Address[],
+    from: bigint,
+    to: bigint,
+  ): Promise<RegistryLog[]>;
+  /** familyId() on a voting module OR a registry — both share the getter. */
+  readFamilyId(target: Address): Promise<Hex>;
 }
 
 export interface ChainListenerDeps {
@@ -85,19 +134,19 @@ export interface ChainListenerDeps {
   maxLogRange: bigint;
   /** Called with the familyId when FamilyDeployed is seen (cache invalidation + backfill). */
   onFamilyDeployed: (familyId: Hex, chainId: number) => Promise<void>;
-  /** Called after votes were ingested (once per pass) with the affected
-   *  families so their ballots can be fanned out to every sibling chain. */
-  onVotesIngested: (familyIds: Set<Hex>) => Promise<void> | void;
+  /** Called after actions were ingested (once per pass) with the affected
+   *  families so their unexpired actions can be fanned out to every sibling. */
+  onActionsIngested: (familyIds: Set<Hex>) => Promise<void> | void;
   pollIntervalMs?: number;
   now?: () => number;
 }
 
 /**
- * Listener mode (spec B.6): tails CrossChainVoteCast on known family voting
- * modules + FamilyDeployed on the pinned deployer. Bounded windows, bisect on
- * range errors, cursor lags head by `confirmations`, (txHash,logIndex) dedup
- * plus (voter,nonce) dedup via the votes UNIQUE constraint. Ingested votes
- * feed the SAME store/workers as the API.
+ * Listener mode (spec B.6): tails CrossChainVoteCast on known voting modules,
+ * the three CrossChain* registry events on known registries, and FamilyDeployed
+ * on the pinned deployer. Bounded windows, bisect on range errors, cursor lags
+ * head by `confirmations`, (txHash,logIndex) dedup plus the actions UNIQUE
+ * constraint. Ingested actions feed the SAME store/workers as the API.
  */
 export class ChainListener {
   private readonly deps: Required<
@@ -144,7 +193,7 @@ export class ChainListener {
     const cursor = store.getCursor(chainId);
     if (cursor === undefined) {
       // First run: anchor at the safe head and scan nothing — historical
-      // backfill is not the listener's job (votes are reconstructible; re-run
+      // backfill is not the listener's job (actions are reconstructible; re-run
       // with a manual cursor if needed). The next pass tails forward from here.
       store.setCursor(chainId, safe - 1n < 0n ? -1n : safe - 1n);
       return;
@@ -161,7 +210,7 @@ export class ChainListener {
     const { store, chainId, chainName, rpc } = this.deps;
 
     // Deployer logs first: a family deployed in this window must be known
-    // before we choose which voting modules to tail for votes.
+    // before we choose which voting modules / registries to tail.
     const deployed = await getLogsBisect(
       (f, t) => rpc.getFamilyDeployedLogs(f, t),
       from,
@@ -171,7 +220,7 @@ export class ChainListener {
     // crash between it and the ingestion below would drop the log forever
     // (dedup hides it on replay). So we probe for dedup first and only record
     // the log as seen after its side effects have committed — replaying an
-    // un-marked log is safe (upsertVote/ensureJob/onFamilyDeployed idempotent).
+    // un-marked log is safe (upsertAction/ensureJob/onFamilyDeployed idempotent).
     for (const evt of deployed) {
       if (store.hasSeenLog(chainId, evt.txHash, evt.logIndex)) continue;
       log(chainName, `FamilyDeployed ${evt.familyId}`, { txHash: evt.txHash });
@@ -179,50 +228,79 @@ export class ChainListener {
       store.markLogSeen(chainId, evt.txHash, evt.logIndex);
     }
 
-    const modules = store.knownVotingModules(chainId);
-    if (modules.length === 0) return;
-    const votes = await getLogsBisect(
-      (f, t) => rpc.getVoteCastLogs(modules, f, t),
-      from,
-      to,
-    );
-    // Fan out every family whose vote landed here — a vote seen on the origin
-    // chain must still reach its siblings (the API path does this via
-    // fanOutFamily; the listener mirrors it).
     const affected = new Set<Hex>();
-    const toMark: VoteCastLog[] = [];
-    for (const evt of votes) {
-      if (store.hasSeenLog(chainId, evt.txHash, evt.logIndex)) continue;
-      const familyId = await this.ingestVote(evt);
-      if (familyId) affected.add(familyId);
-      toMark.push(evt);
+    // Logs whose side effects committed but whose mark-seen waits on fan-out.
+    const toMark: Array<{ txHash: Hex; logIndex: number }> = [];
+
+    // Votes on known voting modules.
+    const modules = store.knownVotingModules(chainId);
+    if (modules.length > 0) {
+      const votes = await getLogsBisect(
+        (f, t) => rpc.getVoteCastLogs(modules, f, t),
+        from,
+        to,
+      );
+      await this.ingestBatch(
+        votes,
+        (evt) => this.ingestVote(evt),
+        affected,
+        toMark,
+      );
     }
+
+    // Registry-governance events on known registries.
+    const registries = store.knownRegistries(chainId);
+    if (registries.length > 0) {
+      const regLogs = await getLogsBisect(
+        (f, t) => rpc.getRegistryLogs(registries, f, t),
+        from,
+        to,
+      );
+      await this.ingestBatch(
+        regLogs,
+        (evt) => this.ingestRegistryLog(evt),
+        affected,
+        toMark,
+      );
+    }
+
     // Fan-out first (creates sibling jobs), then mark seen — so a crash before
-    // fan-out replays the whole vote instead of silently losing its siblings.
-    if (affected.size > 0) await this.deps.onVotesIngested(affected);
+    // fan-out replays the whole action instead of silently losing its siblings.
+    if (affected.size > 0) await this.deps.onActionsIngested(affected);
     for (const evt of toMark) {
       store.markLogSeen(chainId, evt.txHash, evt.logIndex);
     }
   }
 
-  /** Extract the full vote from the event and upsert it (spec: the event
-   *  re-emits the signature precisely so any listener can reconstruct).
-   *  Returns the resolved familyId when a vote row was ingested. */
-  private async ingestVote(evt: VoteCastLog): Promise<Hex | undefined> {
-    const { store, chainId, chainName, rpc } = this.deps;
-    let familyId = store.familyByVotingModule(chainId, evt.votingModule);
-    if (!familyId) {
-      familyId = await rpc
-        .readFamilyId(evt.votingModule)
-        .catch(() => undefined);
-      if (!familyId) {
-        warn(chainName, "vote log from unknown module — skipped", {
-          votingModule: evt.votingModule,
-        });
-        return undefined;
-      }
+  /**
+   * Crash-safe ingestion for one event batch: probe hasSeenLog first (skip
+   * already-recorded logs), ingest side effects, and collect the log into
+   * `toMark` — the caller marks them seen only AFTER the pass's fan-out has
+   * committed, so a crash before fan-out replays the whole log.
+   */
+  private async ingestBatch<T extends { txHash: Hex; logIndex: number }>(
+    logs: T[],
+    ingest: (evt: T) => Promise<Hex | undefined>,
+    affected: Set<Hex>,
+    toMark: Array<{ txHash: Hex; logIndex: number }>,
+  ): Promise<void> {
+    const { store, chainId } = this.deps;
+    for (const evt of logs) {
+      if (store.hasSeenLog(chainId, evt.txHash, evt.logIndex)) continue;
+      const familyId = await ingest(evt);
+      if (familyId) affected.add(familyId);
+      toMark.push({ txHash: evt.txHash, logIndex: evt.logIndex });
     }
-    const { id, created } = store.upsertVote({
+  }
+
+  /** Extract the full vote from the event and upsert it. Returns the familyId
+   *  when a vote row was ingested. */
+  private async ingestVote(evt: VoteCastLog): Promise<Hex | undefined> {
+    const { store, chainName } = this.deps;
+    const familyId = await this.resolveFamilyByModule(evt.votingModule);
+    if (!familyId) return undefined;
+    const { id, created } = store.upsertAction({
+      kind: "vote",
       familyId,
       voter: evt.voter,
       nonce: evt.nonce.toString(),
@@ -231,17 +309,113 @@ export class ChainListener {
       recipients: evt.recipients,
       signature: evt.signature,
     });
-    // The vote already landed on THIS chain — record the origin job as
-    // confirmed with the emitting tx, then let workers fan out to siblings.
-    if (store.ensureJob(id, chainId)) {
-      store.updateJob(id, chainId, { state: "confirmed", txHash: evt.txHash });
-    }
+    this.confirmOrigin(id, evt.txHash);
     if (created) {
       log(chainName, `ingested vote from chain`, {
-        voteId: id,
+        actionId: id,
         voter: evt.voter,
         nonce: evt.nonce,
       });
+    }
+    return familyId;
+  }
+
+  /** Extract a registry-governance action from its event and upsert it. */
+  private async ingestRegistryLog(evt: RegistryLog): Promise<Hex | undefined> {
+    const { store, chainName } = this.deps;
+    const familyId = await this.resolveFamilyByRegistry(evt.registry);
+    if (!familyId) return undefined;
+
+    let action: NewAction;
+    switch (evt.kind) {
+      case "registry-update":
+        action = {
+          kind: "registry-update",
+          familyId,
+          admin: evt.admin,
+          recipients: evt.recipients,
+          nonce: evt.nonce.toString(),
+          deadline: evt.deadline.toString(),
+          signature: evt.signature,
+        };
+        break;
+      case "proposal":
+        action = {
+          kind: "proposal",
+          familyId,
+          proposer: evt.proposer,
+          candidate: evt.candidate,
+          isAddition: evt.isAddition,
+          electorate: evt.electorate,
+          expiresAt: evt.expiresAt.toString(),
+          nonce: evt.nonce.toString(),
+          proposalKey: evt.proposalKey,
+          signature: evt.signature,
+        };
+        break;
+      case "proposal-vote":
+        action = {
+          kind: "proposal-vote",
+          familyId,
+          voter: evt.voter,
+          proposalKey: evt.proposalKey,
+          deadline: evt.deadline.toString(),
+          signature: evt.signature,
+        };
+        break;
+    }
+    const { id, created } = store.upsertAction(action);
+    this.confirmOrigin(id, evt.txHash);
+    if (created) {
+      log(chainName, `ingested ${evt.kind} from chain`, {
+        actionId: id,
+        registry: evt.registry,
+      });
+    }
+    return familyId;
+  }
+
+  /** The action already landed on THIS chain — record the origin job confirmed
+   *  with the emitting tx, then let fan-out reach the siblings. */
+  private confirmOrigin(actionId: number, txHash: Hex): void {
+    const { store, chainId } = this.deps;
+    if (store.ensureJob(actionId, chainId)) {
+      store.updateJob(actionId, chainId, { state: "confirmed", txHash });
+    }
+  }
+
+  private async resolveFamilyByModule(
+    votingModule: Address,
+  ): Promise<Hex | undefined> {
+    const { store, chainId, chainName, rpc } = this.deps;
+    let familyId = store.familyByVotingModule(chainId, votingModule);
+    if (!familyId) {
+      familyId = await rpc.readFamilyId(votingModule).catch(() => undefined);
+      if (!familyId) {
+        warn(chainName, "vote log from unknown module — skipped", {
+          votingModule,
+        });
+        return undefined;
+      }
+    }
+    return familyId;
+  }
+
+  private async resolveFamilyByRegistry(
+    registry: Address,
+  ): Promise<Hex | undefined> {
+    const { store, chainId, chainName, rpc } = this.deps;
+    let familyId = store.familyByRegistry(chainId, registry);
+    if (!familyId) {
+      // Unknown registry → familyId() read fallback (the registry inherits the
+      // same getter as the voting module).
+      familyId = await rpc.readFamilyId(registry).catch(() => undefined);
+      if (!familyId) {
+        warn(chainName, "registry log from unknown registry — skipped", {
+          registry,
+        });
+        return undefined;
+      }
     }
     return familyId;
   }
