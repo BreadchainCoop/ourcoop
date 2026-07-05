@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Body, Button, Caption, Heading4 } from "@breadcoop/ui";
+import { WalletButton } from "@/components/dapp/wallet-button";
 import { ArrowRight, CheckCircle, Circle } from "@phosphor-icons/react";
 import { Card, ProgressBar, StatCard } from "@/components/dapp/ui";
 import { InstanceHeader } from "@/components/dapp/instance-header";
@@ -50,7 +50,7 @@ export default function PortfolioPage() {
             Connect your wallet to see your balance, voting power, and stake
             position.
           </Body>
-          <ConnectButton />
+          <WalletButton />
         </Card>
       )}
 

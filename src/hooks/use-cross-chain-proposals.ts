@@ -2,16 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
-import {
-  useAccount,
-  useSignTypedData,
-  useSwitchChain,
-  useWriteContract,
-} from "wagmi";
+import { useAccount, useSignTypedData } from "wagmi";
 import { votingRecipientRegistryAbi } from "@/lib/abis";
 import { useActiveChainId } from "@/components/instance-provider";
 import { publicClientFor } from "@/lib/instance";
 import { parseTxError } from "@/hooks/use-tx";
+import { useWalletActions } from "@/components/wallet/wallet-actions";
 import {
   CROSS_CHAIN_PROPOSAL_TYPES,
   CROSS_CHAIN_PROPOSAL_VOTE_TYPES,
@@ -25,12 +21,6 @@ import {
   type SignedProposalPayload,
   type SignedProposalVotePayload,
 } from "@/lib/vote-signature";
-import {
-  getActionStatus,
-  postAction,
-  relayConfigured,
-  type RelayVoteStatus,
-} from "@/lib/relay";
 import {
   CROSS_CHAIN_TERMINAL as TERMINAL,
   type ChainActionRow,
@@ -145,10 +135,9 @@ export function useSiblingProposalExpiry(
  */
 export function useCrossChainProposals(family: FamilyState) {
   const chainId = useActiveChainId();
-  const { address, chainId: walletChainId } = useAccount();
+  const { address } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
-  const { switchChainAsync } = useSwitchChain();
-  const { writeContractAsync } = useWriteContract();
+  const { sendSponsored } = useWalletActions();
 
   const [proposals, setProposals] = useState<CrossChainProposal[]>([]);
   const [loading, setLoading] = useState(false);
@@ -160,7 +149,6 @@ export function useCrossChainProposals(family: FamilyState) {
   const [payload, setPayload] = useState<
     SignedProposalPayload | SignedProposalVotePayload | null
   >(null);
-  const [relayDown, setRelayDown] = useState(false);
   const [submitting, setSubmitting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -335,69 +323,19 @@ export function useCrossChainProposals(family: FamilyState) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [family.familyId, address, chainId, seq, found.length]);
 
-  // Fold the relay's advisory report in — never downgrade an on-chain confirm.
-  const applyAdvisory = useCallback(
-    (res: RelayVoteStatus) => {
-      setRows((prev) =>
-        prev.map((r) => {
-          const adv = res.chains.find((c) => c.chainId === r.chainId);
-          if (!adv) return r;
-          if (r.state === "confirmed" || r.state === "superseded") {
-            return { ...r, txHash: r.txHash ?? adv.txHash };
-          }
-          switch (adv.state) {
-            case "pending":
-              return r.state === "submitted"
-                ? r
-                : { ...r, state: "relaying" as const };
-            case "submitted":
-            case "confirmed":
-            case "landed":
-              return {
-                ...r,
-                state: "submitted" as const,
-                txHash: adv.txHash ?? r.txHash,
-              };
-            case "superseded":
-              return { ...r, state: "superseded" as const };
-            case "recipient_mismatch":
-              return { ...r, state: "recipient_mismatch" as const };
-            case "expired":
-              return {
-                ...r,
-                state: "failed" as const,
-                error: "Signature expired before delivery",
-              };
-            case "failed":
-              return {
-                ...r,
-                state: "failed" as const,
-                error: adv.error ?? "Relay delivery failed",
-              };
-            default:
-              return r;
-          }
-        }),
-      );
-    },
-    [setRows],
-  );
-
-  /** Deliver the signed proposal/vote from the wallet on one specific chain. */
+  /** Deliver the signed proposal/vote on one chain (sponsored or self-paid). */
   const submitOnChain = useCallback(
     async (targetChainId: number) => {
       const a = actionRef.current;
       const target = a?.chains.find((c) => c.chainId === targetChainId);
       if (!a || !target) return;
       setSubmitting(targetChainId);
+      updateRow(targetChainId, { state: "relaying", error: undefined });
       try {
-        if (walletChainId !== targetChainId) {
-          await switchChainAsync({ chainId: targetChainId });
-        }
         let hash: Hex;
         if (a.kind === "proposal" && a.create) {
           const m = a.create.message;
-          hash = await writeContractAsync({
+          hash = await sendSponsored({
             chainId: targetChainId,
             address: target.registry,
             abi: votingRecipientRegistryAbi,
@@ -414,7 +352,7 @@ export function useCrossChainProposals(family: FamilyState) {
           });
         } else {
           const v = a.vote!;
-          hash = await writeContractAsync({
+          hash = await sendSponsored({
             chainId: targetChainId,
             address: target.registry,
             abi: votingRecipientRegistryAbi,
@@ -434,44 +372,22 @@ export function useCrossChainProposals(family: FamilyState) {
         setSubmitting(null);
       }
     },
-    [walletChainId, switchChainAsync, writeContractAsync, updateRow],
+    [sendSponsored, updateRow],
   );
 
-  /** Shared delivery kickoff (relay fan-out → wallet fallback). */
+  /** Sign once, then submit to every reachable sibling (gas-sponsored). */
   const startDelivery = useCallback(
     async (
       action: SignedProposalAction,
       body: SignedProposalPayload | SignedProposalVotePayload,
     ) => {
       setPayload(body);
-      setRows((prev) =>
-        prev.map((r) =>
-          action.chains.some((c) => c.chainId === r.chainId)
-            ? { ...r, state: "relaying" as CrossChainActionState }
-            : r,
-        ),
-      );
       setPhase("settling");
-      if (relayConfigured()) {
-        const res = await postAction(body);
-        if (res) {
-          applyAdvisory(res);
-          return;
-        }
+      for (const c of action.chains) {
+        await submitOnChain(c.chainId);
       }
-      setRelayDown(true);
-      const self =
-        action.chains.find((c) => c.chainId === chainId) ?? action.chains[0];
-      setRows((prev) =>
-        prev.map((r) =>
-          r.state === "relaying" && r.chainId !== self?.chainId
-            ? { ...r, state: "awaiting_submission" as CrossChainActionState }
-            : r,
-        ),
-      );
-      if (self) await submitOnChain(self.chainId);
     },
-    [chainId, setRows, applyAdvisory, submitOnChain],
+    [submitOnChain],
   );
 
   /**
@@ -491,7 +407,6 @@ export function useCrossChainProposals(family: FamilyState) {
       const familyId = family.familyId;
       if (!address || !familyId) return;
       setError(null);
-      setRelayDown(false);
       setPayload(null);
       setActionKind("proposal");
       const participants = family.perChain.filter((c) => c.status !== "none");
@@ -572,7 +487,6 @@ export function useCrossChainProposals(family: FamilyState) {
       const familyId = family.familyId;
       if (!address || !familyId) return;
       setError(null);
-      setRelayDown(false);
       setPayload(null);
       setActionKind("proposal-vote");
       const participants = family.perChain.filter((c) => c.status !== "none");
@@ -638,42 +552,13 @@ export function useCrossChainProposals(family: FamilyState) {
     ],
   );
 
-  /** Re-POST the payload to the relays; failed rows go back to relaying. */
-  const retryRelay = useCallback(async () => {
-    if (!payload) return;
-    const res = await postAction(payload);
-    if (!res) {
-      setRelayDown(true);
-      return;
-    }
-    setRelayDown(false);
-    setRows((prev) =>
-      prev.map((r) =>
-        r.state === "failed" || r.state === "recipient_mismatch"
-          ? { ...r, state: "relaying" as const, error: undefined }
-          : r,
-      ),
-    );
-    applyAdvisory(res);
-    setPhase("settling");
-  }, [payload, setRows, applyAdvisory]);
-
-  // Settle loop: advisory relay poll + authoritative per-chain on-chain reads.
+  // Settle loop: authoritative per-chain on-chain reads.
   useEffect(() => {
     if (phase !== "settling") return;
     let cancelled = false;
     const tick = async () => {
       const a = actionRef.current;
       if (!a || cancelled) return;
-      if (relayConfigured() && !relayDown) {
-        const adv = await getActionStatus(
-          a.familyId,
-          a.kind,
-          a.signer,
-          a.proposalKey,
-        ).catch(() => null);
-        if (adv && !cancelled) applyAdvisory(adv);
-      }
       await Promise.all(
         a.chains.map(async (c) => {
           const row = rowsRef.current.find((r) => r.chainId === c.chainId);
@@ -737,7 +622,7 @@ export function useCrossChainProposals(family: FamilyState) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [phase, relayDown, applyAdvisory, updateRow, setRows]);
+  }, [phase, updateRow, setRows]);
 
   const reset = useCallback(() => {
     actionRef.current = null;
@@ -745,7 +630,6 @@ export function useCrossChainProposals(family: FamilyState) {
     setPhase("idle");
     setActionKind(null);
     setPayload(null);
-    setRelayDown(false);
     setError(null);
   }, [setRows]);
 
@@ -759,14 +643,12 @@ export function useCrossChainProposals(family: FamilyState) {
     /** Vote on a proposal by its key (sign once). */
     voteOnProposal,
     submitOnChain,
-    retryRelay,
     reset,
     /** Which action the current delivery is for ("proposal" | "proposal-vote"). */
     actionKind,
     phase,
     rows: rowsState,
     payload,
-    relayDown,
     submitting,
     error,
     isBusy: phase === "signing" || phase === "settling",

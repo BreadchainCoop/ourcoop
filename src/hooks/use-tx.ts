@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { BaseError, type Abi, type Address } from "viem";
+import { useWaitForTransactionReceipt } from "wagmi";
+import { BaseError, type Abi, type Address, type Hex } from "viem";
 import { useActiveChainId } from "@/components/instance-provider";
+import { useWalletActions } from "@/components/wallet/wallet-actions";
 
 /** Pull the most useful human-readable message out of a viem/wagmi error. */
 export function parseTxError(err: unknown): string {
@@ -35,17 +36,18 @@ export interface TxRequest {
 
 /**
  * Standard write → wait-for-receipt flow used by every action in the dapp.
- * `run(request)` submits a contract write and resolves with the tx hash;
- * `status`, `hash`, and `error` drive the UI.
+ * `run(request)` submits a contract write on the active instance's chain and
+ * resolves with the tx hash; `status`, `hash`, and `error` drive the UI.
+ *
+ * Writes go through the wallet-actions layer: gas-sponsored (gasless, no prompt)
+ * when the active wallet is a Privy embedded wallet, else a normal self-paid
+ * wallet tx.
  */
 export function useTx() {
   const chainId = useActiveChainId();
-  const {
-    writeContractAsync,
-    data: hash,
-    isPending: isSigning,
-    reset: resetWrite,
-  } = useWriteContract();
+  const { sendSponsored } = useWalletActions();
+  const [hash, setHash] = useState<Hex | undefined>(undefined);
+  const [isSigning, setIsSigning] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -57,22 +59,34 @@ export function useTx() {
   const run = useCallback(
     async (request: TxRequest): Promise<`0x${string}` | undefined> => {
       setSubmitError(null);
+      setHash(undefined);
+      setIsSigning(true);
       try {
-        return await writeContractAsync(
-          request as Parameters<typeof writeContractAsync>[0],
-        );
+        const h = await sendSponsored({
+          chainId,
+          address: request.address,
+          abi: request.abi,
+          functionName: request.functionName,
+          args: request.args,
+          value: request.value,
+        });
+        setHash(h);
+        return h;
       } catch (e) {
         setSubmitError(parseTxError(e));
         return undefined;
+      } finally {
+        setIsSigning(false);
       }
     },
-    [writeContractAsync],
+    [sendSponsored, chainId],
   );
 
   const reset = useCallback(() => {
     setSubmitError(null);
-    resetWrite();
-  }, [resetWrite]);
+    setHash(undefined);
+    setIsSigning(false);
+  }, []);
 
   const status: TxStatus = submitError
     ? "error"

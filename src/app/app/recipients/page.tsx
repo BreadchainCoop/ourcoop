@@ -946,14 +946,12 @@ function proposalStateLabel(row: ChainActionRow): string {
       return "Recipient list out of sync here";
     case "unreachable":
       return "Couldn't reach chain";
-    case "awaiting_submission":
-      return "Relay unavailable — submit from your wallet";
     case "failed":
       return row.error ?? "Delivery failed";
     case "submitted":
       return "Submitted — confirming…";
     case "relaying":
-      return "Relaying…";
+      return "Submitting…";
     case "signing":
       return "Waiting for your signature…";
     default:
@@ -1160,21 +1158,19 @@ function FamilyDemocraticRecipients({
       <MultiChainActionStatus
         rows={cc.rows}
         phase={cc.phase}
-        relayDown={cc.relayDown}
         submitting={cc.submitting}
         payload={cc.payload}
         onSubmitOnChain={cc.submitOnChain}
-        onRetryRelay={cc.retryRelay}
         copy={{
           stateLabel: proposalStateLabel,
-          aggregate: ({ counted, total, phase, relayDown }) =>
+          aggregate: ({ counted, total, phase }) =>
             phase === "signing"
               ? "Confirm in your wallet…"
-              : phase === "done" || relayDown
+              : phase === "done"
                 ? `Landed on ${counted} of ${total} chain${
                     total === 1 ? "" : "s"
                   }`
-                : `Relaying to ${total} chain${total === 1 ? "" : "s"}…`,
+                : `Submitting to ${total} chain${total === 1 ? "" : "s"}…`,
           copyLabel: "Copy signed payload",
           copyHint: "Anyone can deliver this — paste it to your community.",
         }}

@@ -13,8 +13,6 @@ Monorepo: a **Next.js frontend at the repo root** and the **Foundry smart contra
 contracts/            Foundry project (the protocol)
   src/ test/ script/  Solidity + tests + deploy scripts
   foundry.toml        contracts build config (FOUNDRY_PROFILE=ci in CI)
-relay/                Cross-chain vote relay (standalone npm package, Node 20+;
-                      Hono + viem + SQLite; see relay/README.md)
 .github/workflows/    CI (contracts build/test today; etherform + web deploy to follow)
 ```
 
@@ -24,7 +22,7 @@ relay/                Cross-chain vote relay (standalone npm package, Node 20+;
 - **pnpm 11** (`packageManager` pinned). Path alias `@/* → ./src/*`.
 - **Tailwind CSS v4** (CSS-first, no JS config) via `@tailwindcss/postcss`.
 - **Design system: `@breadcoop/ui`** (Breadchain bread-ui-kit). Tokens + Pogaca fonts + components come from `@import "@breadcoop/ui/theme"` in `src/app/globals.css`. Prefer its components (`Button`, `Heading1–5`, `Body`, `Logo`, `Chip`) and tokens (`bg-core-orange`, `text-text-standard`, `font-breadDisplay`, etc.). Icons: `@phosphor-icons/react`.
-- **Web3**: wagmi v2 + viem + RainbowKit (Gnosis chain). Config in `src/lib/wagmi.ts`, providers in `src/components/providers.tsx`, contract ABIs in `src/lib/abis/`, deployed addresses in `src/lib/constants.ts`, read/write hooks in `src/hooks/`.
+- **Web3**: wagmi v2 + viem + Privy (embedded wallets + gasless "App pays" cross-chain submission; falls back to a plain injected wallet when `NEXT_PUBLIC_PRIVY_APP_ID` is unset). Config in `src/lib/wagmi.ts`, providers in `src/components/providers.tsx`, the wallet/gas-sponsorship layer in `src/components/wallet/`, contract ABIs in `src/lib/abis/`, deployed addresses in `src/lib/constants.ts`, read/write hooks in `src/hooks/`.
 
 ## Commands
 

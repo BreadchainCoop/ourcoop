@@ -158,11 +158,9 @@ function SyncEverywhere({
       <MultiChainActionStatus
         rows={sync.rows}
         phase={sync.phase}
-        relayDown={sync.relayDown}
         submitting={sync.submitting}
         payload={sync.payload}
         onSubmitOnChain={sync.submitOnChain}
-        onRetryRelay={sync.retryRelay}
         copy={{
           stateLabel: (row) => {
             switch (row.state) {
@@ -174,24 +172,22 @@ function SyncEverywhere({
                 return "Recipient list out of sync";
               case "unreachable":
                 return "Couldn't reach chain";
-              case "awaiting_submission":
-                return "Relay unavailable — submit from your wallet";
               case "failed":
                 return row.error ?? "Delivery failed";
               case "submitted":
                 return "Submitted — confirming…";
               case "relaying":
-                return "Relaying…";
+                return "Submitting…";
               case "signing":
                 return "Waiting for your signature…";
               default:
                 return "Waiting…";
             }
           },
-          aggregate: ({ counted, total, phase, relayDown }) =>
+          aggregate: ({ counted, total, phase }) =>
             phase === "signing"
               ? "Confirm in your wallet…"
-              : phase === "done" || relayDown
+              : phase === "done"
                 ? `Synced on ${counted} of ${total} chain${
                     total === 1 ? "" : "s"
                   }`

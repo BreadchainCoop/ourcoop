@@ -7,7 +7,6 @@ import {
   SpinnerGap,
   ArrowSquareOut,
   MinusCircle,
-  ArrowsClockwise,
   Copy,
   Check,
 } from "@phosphor-icons/react";
@@ -38,8 +37,6 @@ function RowIcon({ state }: { state: CrossChainActionState }) {
     );
   if (state === "skipped_no_power")
     return <MinusCircle size={18} className="text-surface-grey" />;
-  if (state === "awaiting_submission")
-    return <Warning size={18} weight="fill" className="text-system-warning" />;
   if (
     state === "failed" ||
     state === "recipient_mismatch" ||
@@ -51,7 +48,6 @@ function RowIcon({ state }: { state: CrossChainActionState }) {
 
 function textClass(state: CrossChainActionState): string {
   if (state === "confirmed") return "text-system-green";
-  if (state === "awaiting_submission") return "text-system-warning";
   if (
     state === "failed" ||
     state === "recipient_mismatch" ||
@@ -70,7 +66,6 @@ export interface ActionStatusCopy {
     counted: number;
     total: number;
     phase: CrossChainActionPhase;
-    relayDown: boolean;
   }) => string;
   /** The "Copy signed …" button label. */
   copyLabel: string;
@@ -84,30 +79,27 @@ export interface ActionStatusCopy {
  * Multi-chain delivery status in the TxStatus visual grammar, one stacked row
  * per chain. Generic across every sign-once cross-chain action — the vote page,
  * the democratic recipients flows, and the admin "Sync everywhere" panel all
- * render this. Partial success ("… on K of N chains") is a first-class terminal
+ * render this. Delivery is gas-sponsored from the browser (or a self-paid
+ * wallet tx); partial success ("… on K of N chains") is a first-class terminal
  * state; a chain that skipped (no power / already synced) is not a failure.
- * Failed rows carry remediation (Retry via relay / Submit from wallet), and the
- * whole signed payload is copyable so anyone can deliver it.
+ * Failed rows carry a per-row "Submit from wallet" retry, and the whole signed
+ * payload is copyable so anyone can deliver it.
  */
 export function MultiChainActionStatus({
   rows,
   phase,
-  relayDown,
   submitting,
   payload,
   copy,
   onSubmitOnChain,
-  onRetryRelay,
 }: {
   rows: ChainActionRow[];
   phase: CrossChainActionPhase;
-  relayDown: boolean;
   submitting: number | null;
-  /** The signed payload as relay-POST JSON — the "anyone can deliver" hatch. */
+  /** The signed payload as JSON — the "anyone can deliver" hatch. */
   payload: unknown;
   copy: ActionStatusCopy;
   onSubmitOnChain: (chainId: number) => void;
-  onRetryRelay: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   if (phase === "idle" || rows.length === 0) return null;
@@ -117,7 +109,7 @@ export function MultiChainActionStatus({
   const total = active.length;
   const submitVerb = copy.submitVerb ?? "Submit on";
 
-  const aggregate = copy.aggregate({ counted, total, phase, relayDown });
+  const aggregate = copy.aggregate({ counted, total, phase });
   const anyFailed = rows.some((r) => needsRemediation(r.state));
 
   const copyPayload = async () => {
@@ -163,19 +155,9 @@ export function MultiChainActionStatus({
                 {copy.stateLabel(row)}
               </span>
 
-              {/* Per-row remediation for a chain that hasn't landed. */}
+              {/* Per-row retry for a chain that hasn't landed. */}
               {needsRemediation(row.state) && (
                 <div className="mt-1 flex flex-wrap gap-3">
-                  {!relayDown && (
-                    <button
-                      type="button"
-                      onClick={onRetryRelay}
-                      className="text-core-orange inline-flex items-center gap-1 text-xs font-semibold hover:underline"
-                    >
-                      <ArrowsClockwise size={12} weight="bold" /> Retry via
-                      relay
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => onSubmitOnChain(row.chainId)}
@@ -194,7 +176,7 @@ export function MultiChainActionStatus({
         ))}
       </ul>
 
-      {(relayDown || anyFailed) && payload != null && (
+      {anyFailed && payload != null && (
         <div className="border-paper-2 mt-3 border-t pt-3">
           <button
             type="button"
