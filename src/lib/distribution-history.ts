@@ -67,6 +67,9 @@ function windows(
 /**
  * Fetch `Distributed` logs for one strategy over [fromBlock, toBlock], chunked
  * by `maxRange` and bisecting any window the RPC rejects (range too large).
+ * `complete` is false if a single-block window still failed after bisection — the
+ * caller must then NOT advance its cache cursor past this range, so the dropped
+ * block is re-scanned next time instead of becoming a permanent gap.
  */
 async function fetchDistributedLogs(
   chainId: number,
@@ -74,10 +77,11 @@ async function fetchDistributedLogs(
   fromBlock: bigint,
   toBlock: bigint,
   maxRange: bigint,
-): Promise<DistLog[]> {
+): Promise<{ logs: DistLog[]; complete: boolean }> {
   const client = publicClientFor(chainId);
   const stack = windows(fromBlock, toBlock, maxRange).reverse();
   const logs: DistLog[] = [];
+  let complete = true;
   while (stack.length > 0) {
     const [lo, hi] = stack.pop()!;
     if (lo > hi) continue;
@@ -94,11 +98,13 @@ async function fetchDistributedLogs(
       if (hi > lo) {
         const mid = lo + (hi - lo) / 2n;
         stack.push([mid + 1n, hi], [lo, mid]);
+      } else {
+        // A single block still failed — the scan is incomplete for this range.
+        complete = false;
       }
-      // A single block that still fails is dropped (next refresh retries).
     }
   }
-  return logs;
+  return { logs, complete };
 }
 
 /** Group per-recipient logs into rounds (one per tx) and attach timestamps. */
@@ -270,15 +276,17 @@ export async function loadChainDistributions(
   }
 
   let fresh: DistributionRound[] = [];
+  let complete = true;
   if (scanFrom <= scanTo) {
-    const logs = await fetchDistributedLogs(
+    const res = await fetchDistributedLogs(
       chainId,
       strategy,
       scanFrom,
       scanTo,
       opts.maxRange,
     );
-    fresh = await logsToRounds(chainId, logs);
+    complete = res.complete;
+    fresh = await logsToRounds(chainId, res.logs);
   }
 
   // Merge (dedupe by txHash), newest first.
@@ -289,9 +297,24 @@ export async function loadChainDistributions(
       b.timestamp - a.timestamp || Number(b.blockNumber - a.blockNumber),
   );
 
-  const newFrom = coveredFrom;
-  const newTo = cached ? bigMax(BigInt(cached.toBlock), latest) : latest;
-  writeCache(chainId, strategy, newFrom, newTo, merged);
+  // Persist the events we found, but only ADVANCE the covered range when the
+  // scan was complete. If a block was dropped, keep the previous cursor (or
+  // don't cache a fresh range at all) so the gap is re-scanned next visit
+  // rather than being permanently skipped.
+  if (complete) {
+    const newTo = cached ? bigMax(BigInt(cached.toBlock), latest) : latest;
+    writeCache(chainId, strategy, coveredFrom, newTo, merged);
+  } else if (cached) {
+    writeCache(
+      chainId,
+      strategy,
+      BigInt(cached.fromBlock),
+      BigInt(cached.toBlock),
+      merged,
+    );
+  }
+  // incomplete + no prior cache → don't cache a covered range; next visit
+  // re-scans fresh (the rounds found this pass are still returned/shown).
   return merged;
 }
 

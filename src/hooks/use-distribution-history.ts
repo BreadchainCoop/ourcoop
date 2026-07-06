@@ -61,6 +61,8 @@ export interface DistributionHistory {
   roundCount: number;
   recipientCount: number;
   isFamily: boolean;
+  /** Chains whose scan errored — their history is missing, so totals are partial. */
+  failedChains: number[];
 }
 
 async function readTokenMeta(
@@ -92,6 +94,7 @@ function aggregate(
   rounds: DistributionRound[],
   meta: Map<number, TokenMeta>,
   isFamily: boolean,
+  failedChains: number[],
 ): DistributionHistory {
   const metaFor = (chainId: number): TokenMeta =>
     meta.get(chainId) ?? { decimals: 18, symbol: "" };
@@ -156,6 +159,7 @@ function aggregate(
     roundCount: enriched.length,
     recipientCount: recipients.length,
     isFamily,
+    failedChains,
   };
 }
 
@@ -211,6 +215,12 @@ export function useDistributionHistory() {
 
   const targetKey = targets.map((t) => `${t.chainId}:${t.strategy}`).join("|");
 
+  // A "load older" request is scoped to the current target set — reset it when
+  // the instance/family changes so we don't kick off an oversized scan.
+  useEffect(() => {
+    olderRef.current = 0n;
+  }, [targetKey]);
+
   useEffect(() => {
     if (family.isLoading || targets.length === 0) return;
     let cancelled = false;
@@ -219,14 +229,16 @@ export function useDistributionHistory() {
     void (async () => {
       try {
         const older = olderRef.current;
-        const [allRounds, metaEntries] = await Promise.all([
-          Promise.all(
+        // Per-chain: allSettled so one chain's RPC error surfaces as a partial
+        // warning instead of silently undercounting the aggregated totals.
+        const [settled, metaEntries] = await Promise.all([
+          Promise.allSettled(
             targets.map((t) =>
               loadChainDistributions(t, {
                 initialLookback: 200_000n,
                 maxRange: 9_000n,
                 ...(older > 0n ? { olderBlocks: older } : {}),
-              }).catch(() => [] as DistributionRound[]),
+              }),
             ),
           ),
           Promise.all(
@@ -237,8 +249,20 @@ export function useDistributionHistory() {
           ),
         ]);
         if (cancelled) return;
+        const rounds: DistributionRound[] = [];
+        const failedChains: number[] = [];
+        settled.forEach((res, i) => {
+          if (res.status === "fulfilled") rounds.push(...res.value);
+          else failedChains.push(targets[i].chainId);
+        });
+        // Every target failed → treat it as a hard error, not a partial view.
+        if (failedChains.length === targets.length) {
+          setError("Couldn't reach any chain to read distribution history.");
+          setIsLoading(false);
+          return;
+        }
         const meta = new Map<number, TokenMeta>(metaEntries);
-        setHistory(aggregate(allRounds.flat(), meta, family.isFamily));
+        setHistory(aggregate(rounds, meta, family.isFamily, failedChains));
       } catch (e) {
         if (!cancelled)
           setError(e instanceof Error ? e.message : "Failed to load history");

@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { Body, Button, Caption } from "@breadcoop/ui";
-import { ArrowSquareOut, CaretDown, Globe } from "@phosphor-icons/react";
+import {
+  ArrowSquareOut,
+  CaretDown,
+  Globe,
+  Warning,
+} from "@phosphor-icons/react";
 import { Card, EmptyState, PageHeader, StatCard } from "@/components/dapp/ui";
 import {
   useDistributionHistory,
@@ -56,12 +61,29 @@ export default function HistoryPage() {
         </Card>
       )}
 
-      {history && !hasData && !isLoading && (
-        <EmptyState>
-          No yield has been distributed yet. Once a cycle completes and someone
-          runs distribution, it will show up here.
-        </EmptyState>
+      {/* Partial data: one or more chains couldn't be read, so totals undercount. */}
+      {history && history.failedChains.length > 0 && (
+        <Card className="border-system-warning/40 bg-system-warning/5 mb-6">
+          <Caption className="text-system-warning flex items-center gap-1.5">
+            <Warning size={14} weight="fill" />
+            Partial history — couldn&apos;t read{" "}
+            {history.failedChains.map((c) => shortChainName(c)).join(", ")}.
+            Totals below exclude{" "}
+            {history.failedChains.length === 1 ? "it" : "them"}; try again
+            shortly.
+          </Caption>
+        </Card>
       )}
+
+      {history &&
+        !hasData &&
+        !isLoading &&
+        history.failedChains.length === 0 && (
+          <EmptyState>
+            No yield has been distributed yet. Once a cycle completes and
+            someone runs distribution, it will show up here.
+          </EmptyState>
+        )}
 
       {hasData && (
         <>
@@ -213,11 +235,14 @@ function RecipientRow({
 
 function RoundRow({ round }: { round: EnrichedRound }) {
   const [open, setOpen] = useState(false);
+  const panelId = `round-${round.chainId}-${round.txHash}`;
   return (
     <Card className="!p-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
         className="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left"
       >
         <div className="min-w-0">
@@ -236,7 +261,7 @@ function RoundRow({ round }: { round: EnrichedRound }) {
         />
       </button>
       {open && (
-        <div className="border-paper-2 border-t px-5 py-3">
+        <div id={panelId} className="border-paper-2 border-t px-5 py-3">
           <ul className="space-y-1.5">
             {round.recipients.map((x) => (
               <li
