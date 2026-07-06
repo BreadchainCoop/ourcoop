@@ -49,6 +49,7 @@ import {
   type CrossChainProposal,
 } from "@/hooks/use-cross-chain-proposals";
 import { MultiChainActionStatus } from "@/components/dapp/multi-chain-action-status";
+import { GasModeNote } from "@/components/dapp/gas-mode-note";
 import type { ChainActionRow } from "@/lib/cross-chain-action";
 
 export default function RecipientsPage() {
@@ -1066,6 +1067,11 @@ function FamilyDemocraticRecipients({
             Propose
           </Button>
         </div>
+        {amRecipient && (
+          <div className="mt-2">
+            <GasModeNote />
+          </div>
+        )}
         {!amRecipient && (
           <Caption className="text-system-warning mt-2 block">
             {isConnected

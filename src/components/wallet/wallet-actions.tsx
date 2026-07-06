@@ -2,8 +2,9 @@
 
 import { createContext, useCallback, useContext, type ReactNode } from "react";
 import type { Abi, Address, Hex } from "viem";
+import { getChainId } from "@wagmi/core";
 import {
-  useAccount,
+  useConfig,
   useConnect,
   useDisconnect,
   useSwitchChain,
@@ -31,6 +32,12 @@ export interface WalletActions {
    * a normal self-paid wallet tx (switching chain first). Returns the tx hash.
    */
   sendSponsored: (req: SponsoredTxRequest) => Promise<Hex>;
+  /**
+   * True when the active wallet is gas-sponsored (Privy embedded): cross-chain
+   * actions land automatically with no prompt or network switch. False for a
+   * self-paid wallet — the user confirms one tx per chain and needs gas on each.
+   */
+  sponsored: boolean;
 }
 
 export const WalletActionsContext = createContext<WalletActions | null>(null);
@@ -49,14 +56,19 @@ export function useWalletActions(): WalletActions {
  * Shared self-paid path: switch the wallet to the target chain if needed, then
  * write. Used verbatim by the fallback provider and by the Privy provider when
  * the active wallet is an EXTERNAL wallet (which can't be gas-sponsored).
+ *
+ * The current chain is read LIVE via `getChainId(config)` — not a stale
+ * `useAccount()` closure — so a sequential per-chain fan-out (e.g. voting on N
+ * chains, minting across N chains) switches correctly for every chain even
+ * though React doesn't re-render between the awaited submissions.
  */
 export function useWalletWrite() {
-  const { chainId: walletChainId } = useAccount();
+  const config = useConfig();
   const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
   return useCallback(
     async (req: SponsoredTxRequest): Promise<Hex> => {
-      if (walletChainId !== req.chainId) {
+      if (getChainId(config) !== req.chainId) {
         await switchChainAsync({ chainId: req.chainId });
       }
       return writeContractAsync({
@@ -68,7 +80,7 @@ export function useWalletWrite() {
         ...(req.value !== undefined ? { value: req.value } : {}),
       } as Parameters<typeof writeContractAsync>[0]);
     },
-    [walletChainId, switchChainAsync, writeContractAsync],
+    [config, switchChainAsync, writeContractAsync],
   );
 }
 
@@ -88,6 +100,7 @@ export function WagmiWalletActions({ children }: { children: ReactNode }) {
     },
     disconnect: () => disconnect(),
     sendSponsored: write,
+    sponsored: false, // injected wallets always self-pay
   };
 
   return (

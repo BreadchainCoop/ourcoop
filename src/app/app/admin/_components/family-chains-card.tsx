@@ -11,6 +11,7 @@ import { useFamily, type FamilyChainState } from "@/hooks/use-family";
 import { useRegistryKind } from "@/hooks/use-recipient-voting";
 import { useCrossChainRegistryUpdate } from "@/hooks/use-cross-chain-registry-update";
 import { MultiChainActionStatus } from "@/components/dapp/multi-chain-action-status";
+import { GasModeNote } from "@/components/dapp/gas-mode-note";
 import {
   diffRecipients,
   useMirrorRecipients,
@@ -152,6 +153,9 @@ function SyncEverywhere({
       >
         {drift ? "Sync recipients everywhere" : "Re-sync recipients"}
       </Button>
+      <div className="mt-2">
+        <GasModeNote />
+      </div>
       {sync.error && (
         <Caption className="text-system-red mt-2 block">{sync.error}</Caption>
       )}

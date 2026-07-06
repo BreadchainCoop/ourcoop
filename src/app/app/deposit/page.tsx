@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { parseAmount } from "@/lib/format";
 import { useAmountFormatter } from "@/components/demo-mode-provider";
 import { useActiveChain, useNativeSymbol } from "@/hooks/use-chain";
+import { useFamily } from "@/hooks/use-family";
+import { FamilyDeposit } from "@/app/app/deposit/_components/family-deposit";
 import {
   useApproveWrapped,
   useDeposit,
@@ -23,14 +25,35 @@ export default function DepositPage() {
   const { symbol } = useInstanceToken();
   const native = useNativeSymbol();
   const { yieldKind, wrappedSymbol } = useActiveChain();
+  const family = useFamily();
   const depositSym = yieldKind === "stable" ? wrappedSymbol : native;
+  const isFamily = family.isFamily && !family.isLoading;
+
   return (
     <div className="mx-auto max-w-lg">
       <PageHeader
         title="Deposit"
-        subtitle={`Stake ${depositSym} to mint ${symbol} 1:1. Your principal stays fully withdrawable — only the interest is distributed.`}
+        subtitle={
+          isFamily
+            ? `Mint ${symbol} across the chains this community lives on — deposit whatever you hold on each. Your principal stays withdrawable; only the interest is distributed.`
+            : `Stake ${depositSym} to mint ${symbol} 1:1. Your principal stays fully withdrawable — only the interest is distributed.`
+        }
       />
-      <DepositForm />
+      {isFamily ? (
+        <>
+          <FamilyDeposit family={family} tokenSymbol={symbol} />
+          <details className="mt-4">
+            <summary className="text-surface-grey-2 hover:text-text-standard cursor-pointer text-sm font-medium">
+              Or deposit on just this chain
+            </summary>
+            <div className="mt-3">
+              <DepositForm />
+            </div>
+          </details>
+        </>
+      ) : (
+        <DepositForm />
+      )}
     </div>
   );
 }

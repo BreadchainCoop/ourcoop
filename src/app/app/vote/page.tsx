@@ -12,6 +12,7 @@ import {
   ProgressBar,
 } from "@/components/dapp/ui";
 import { ActionButton } from "@/components/dapp/action-button";
+import { GasModeNote } from "@/components/dapp/gas-mode-note";
 import { TxStatus } from "@/components/dapp/tx-status";
 import { useRecipients } from "@/hooks/use-recipients";
 import { useVote, useVotingState } from "@/hooks/use-voting";
@@ -379,6 +380,9 @@ function FamilyVoteForm({ family }: { family: ReturnType<typeof useFamily> }) {
         >
           {alreadyVoted ? "Update vote" : "Cast vote"}
         </ActionButton>
+        <div className="mt-2 text-center">
+          <GasModeNote />
+        </div>
       </div>
 
       {!anyAllocated && (
