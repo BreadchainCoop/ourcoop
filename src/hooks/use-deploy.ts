@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { decodeEventLog, type Address, type Hex } from "viem";
+import { decodeEventLog, type Address, type Hex, type Log } from "viem";
 import {
   useChainId,
   useWaitForTransactionReceipt,
@@ -28,6 +28,49 @@ export interface DeployParams {
   // Instance artwork (off-chain URIs). Empty string = none.
   tokenImageURI?: string;
   bannerImageURI?: string;
+  // Multi-chain family instance (see lib/families.ts). Default false = classic.
+  crossChain?: boolean;
+}
+
+/** Decode the deployed instance out of a receipt's SystemDeployed event. */
+export function decodeInstanceFromLogs(
+  logs: readonly Log[],
+): InstanceAddresses | null {
+  for (const log of logs) {
+    try {
+      const ev = decodeEventLog({
+        abi: deployerAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (ev.eventName === "SystemDeployed" && "instance" in ev.args) {
+        // The event tuple names + order differ from InstanceAddresses
+        // (notably `registry` -> `recipientRegistry`), so map explicitly.
+        const i = ev.args.instance as {
+          cycleModule: Address;
+          registry: Address;
+          token: Address;
+          votingPowerStrategy: Address;
+          distributionManager: Address;
+          distributionStrategy: Address;
+          secondaryDistributionStrategy: Address;
+          votingModule: Address;
+        };
+        return {
+          token: i.token,
+          distributionManager: i.distributionManager,
+          cycleModule: i.cycleModule,
+          votingModule: i.votingModule,
+          recipientRegistry: i.registry,
+          distributionStrategy: i.distributionStrategy,
+          votingPowerStrategy: i.votingPowerStrategy,
+        };
+      }
+    } catch {
+      // not our event — keep scanning
+    }
+  }
+  return null;
 }
 
 /**
@@ -56,44 +99,10 @@ export function useDeployInstance() {
     error: receiptError,
   } = useWaitForTransactionReceipt({ hash, chainId });
 
-  const instance = useMemo<InstanceAddresses | null>(() => {
-    if (!receipt) return null;
-    for (const log of receipt.logs) {
-      try {
-        const ev = decodeEventLog({
-          abi: deployerAbi,
-          data: log.data,
-          topics: log.topics,
-        });
-        if (ev.eventName === "SystemDeployed" && "instance" in ev.args) {
-          // The event tuple names + order differ from InstanceAddresses
-          // (notably `registry` -> `recipientRegistry`), so map explicitly.
-          const i = ev.args.instance as {
-            cycleModule: Address;
-            registry: Address;
-            token: Address;
-            votingPowerStrategy: Address;
-            distributionManager: Address;
-            distributionStrategy: Address;
-            secondaryDistributionStrategy: Address;
-            votingModule: Address;
-          };
-          return {
-            token: i.token,
-            distributionManager: i.distributionManager,
-            cycleModule: i.cycleModule,
-            votingModule: i.votingModule,
-            recipientRegistry: i.registry,
-            distributionStrategy: i.distributionStrategy,
-            votingPowerStrategy: i.votingPowerStrategy,
-          };
-        }
-      } catch {
-        // not our event — keep scanning
-      }
-    }
-    return null;
-  }, [receipt]);
+  const instance = useMemo<InstanceAddresses | null>(
+    () => (receipt ? decodeInstanceFromLogs(receipt.logs) : null),
+    [receipt],
+  );
 
   const deploy = async (p: DeployParams) => {
     if (!deployer) {
@@ -121,6 +130,7 @@ export function useDeployInstance() {
             distributionKind: p.distributionKind ?? 0,
             tokenImageURI: p.tokenImageURI ?? "",
             bannerImageURI: p.bannerImageURI ?? "",
+            crossChain: p.crossChain ?? false,
           },
         ],
       });

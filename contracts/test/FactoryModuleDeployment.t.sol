@@ -192,8 +192,9 @@ contract FactoryModuleDeploymentTest is Test {
         IVotingPowerStrategy[] memory strategies = new IVotingPowerStrategy[](1);
         strategies[0] = IVotingPowerStrategy(mockStrategy);
 
-        bytes memory payload = abi.encodeWithSelector(
-            BasisPointsVotingModule.initialize.selector,
+        // encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
+        bytes memory payload = abi.encodeWithSignature(
+            "initialize(uint256,address[],address,address)",
             100, // maxPoints
             strategies,
             address(distModule),

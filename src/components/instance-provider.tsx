@@ -183,12 +183,26 @@ export function InstanceProvider({ children }: { children: ReactNode }) {
 
   const addInstance = useCallback((instance: KnownInstance) => {
     setKnown((prev) => {
-      const exists = prev.some(
-        (i) =>
-          i.addresses.distributionManager.toLowerCase() ===
-          instance.addresses.distributionManager.toLowerCase(),
+      const dm = instance.addresses.distributionManager.toLowerCase();
+      const existing = prev.find(
+        (i) => i.addresses.distributionManager.toLowerCase() === dm,
       );
-      const next = exists ? prev : [...prev, instance];
+      // A standalone record added earlier won't carry family metadata. If this
+      // call brings familyId/primaryChainId, merge them in so the instance can
+      // group into its family in the switcher instead of staying orphaned.
+      const next = !existing
+        ? [...prev, instance]
+        : instance.familyId && !existing.familyId
+          ? prev.map((i) =>
+              i.addresses.distributionManager.toLowerCase() === dm
+                ? {
+                    ...i,
+                    familyId: instance.familyId,
+                    primaryChainId: instance.primaryChainId,
+                  }
+                : i,
+            )
+          : prev;
       saveKnownInstances(next);
       return next;
     });

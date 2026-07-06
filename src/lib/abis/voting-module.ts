@@ -49,6 +49,20 @@ export const votingModuleAbi = [
   },
   {
     type: "function",
+    name: "castCrossChainVote",
+    inputs: [
+      { name: "voter", type: "address", internalType: "address" },
+      { name: "points", type: "uint256[]", internalType: "uint256[]" },
+      { name: "recipients", type: "address[]", internalType: "address[]" },
+      { name: "nonce", type: "uint256", internalType: "uint256" },
+      { name: "deadline", type: "uint256", internalType: "uint256" },
+      { name: "signature", type: "bytes", internalType: "bytes" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "castVoteWithSignature",
     inputs: [
       { name: "voter", type: "address", internalType: "address" },
@@ -71,6 +85,13 @@ export const votingModuleAbi = [
     ],
     outputs: [],
     stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "crossChainDomainSeparator",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32", internalType: "bytes32" }],
+    stateMutability: "view",
   },
   {
     type: "function",
@@ -107,6 +128,13 @@ export const votingModuleAbi = [
       { name: "salt", type: "bytes32", internalType: "bytes32" },
       { name: "extensions", type: "uint256[]", internalType: "uint256[]" },
     ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "familyId",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32", internalType: "bytes32" }],
     stateMutability: "view",
   },
   {
@@ -213,6 +241,13 @@ export const votingModuleAbi = [
   },
   {
     type: "function",
+    name: "lastCrossChainNonce",
+    inputs: [{ name: "voter", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "maxPoints",
     inputs: [],
     outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
@@ -250,6 +285,13 @@ export const votingModuleAbi = [
   },
   {
     type: "function",
+    name: "recipientsHash",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32", internalType: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "renounceOwnership",
     inputs: [],
     outputs: [],
@@ -282,6 +324,20 @@ export const votingModuleAbi = [
     inputs: [
       { name: "voter", type: "address", internalType: "address" },
       { name: "nonce", type: "uint256", internalType: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "validateCrossChainSignature",
+    inputs: [
+      { name: "voter", type: "address", internalType: "address" },
+      { name: "points", type: "uint256[]", internalType: "uint256[]" },
+      { name: "recipients", type: "address[]", internalType: "address[]" },
+      { name: "nonce", type: "uint256", internalType: "uint256" },
+      { name: "deadline", type: "uint256", internalType: "uint256" },
+      { name: "signature", type: "bytes", internalType: "bytes" },
     ],
     outputs: [{ name: "", type: "bool", internalType: "bool" }],
     stateMutability: "view",
@@ -368,6 +424,55 @@ export const votingModuleAbi = [
         type: "uint256[]",
         indexed: false,
         internalType: "uint256[]",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "CrossChainVoteCast",
+    inputs: [
+      {
+        name: "voter",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "points",
+        type: "uint256[]",
+        indexed: false,
+        internalType: "uint256[]",
+      },
+      {
+        name: "recipients",
+        type: "address[]",
+        indexed: false,
+        internalType: "address[]",
+      },
+      {
+        name: "votingPower",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "nonce",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "deadline",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "signature",
+        type: "bytes",
+        indexed: false,
+        internalType: "bytes",
       },
     ],
     anonymous: false,
@@ -573,6 +678,8 @@ export const votingModuleAbi = [
   { type: "error", name: "AlreadyVotedInCurrentCycle", inputs: [] },
   { type: "error", name: "ArrayLengthMismatch", inputs: [] },
   { type: "error", name: "BatchTooLarge", inputs: [] },
+  { type: "error", name: "CrossChainNotEnabled", inputs: [] },
+  { type: "error", name: "CrossChainOnly", inputs: [] },
   { type: "error", name: "ECDSAInvalidSignature", inputs: [] },
   {
     type: "error",
@@ -604,6 +711,10 @@ export const votingModuleAbi = [
     inputs: [{ name: "account", type: "address", internalType: "address" }],
   },
   { type: "error", name: "RecipientRegistryNotSet", inputs: [] },
+  { type: "error", name: "RecipientSetMismatch", inputs: [] },
+  { type: "error", name: "SignatureExpired", inputs: [] },
+  { type: "error", name: "StaleNonce", inputs: [] },
   { type: "error", name: "ZeroAddress", inputs: [] },
   { type: "error", name: "ZeroVotePoints", inputs: [] },
+  { type: "error", name: "ZeroVotingPower", inputs: [] },
 ] as const;

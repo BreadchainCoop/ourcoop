@@ -156,8 +156,9 @@ contract VotingModuleSimpleTest is Test {
         strategies[0] = IVotingPowerStrategy(address(tokenStrategy));
         {
             BasisPointsVotingModule votingImpl = new BasisPointsVotingModule();
-            bytes memory votingInit = abi.encodeWithSelector(
-                BasisPointsVotingModule.initialize.selector,
+            // encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
+            bytes memory votingInit = abi.encodeWithSignature(
+                "initialize(uint256,address[],address,address)",
                 MAX_POINTS,
                 strategies,
                 address(distributionModule),

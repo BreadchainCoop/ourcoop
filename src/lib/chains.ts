@@ -227,9 +227,35 @@ export function nativeSymbol(chainId?: number): string {
   return chainConfig(chainId).chain.nativeCurrency.symbol;
 }
 
+/** Compact chain label for chips/rows ("Arbitrum One" → "Arbitrum"). */
+export function shortChainName(chainId?: number): string {
+  const name = chainConfig(chainId).chain.name;
+  if (chainId === optimism.id) return "Optimism";
+  return name.replace(/ (One|Mainnet)$/, "");
+}
+
 /** Whether a chain id is one we support. */
 export function isSupportedChain(chainId?: number): boolean {
   return !!chainId && chainId in CHAINS;
+}
+
+/** Chain ids where a new instance can be deployed (a pinned deployer is present). */
+export function deployableChainIds(): number[] {
+  return Object.keys(CHAINS)
+    .map(Number)
+    .filter((id) => CHAINS[id].deployable && CHAINS[id].deployer);
+}
+
+/**
+ * Short "what the stake earns yield on" label for a chain — the deposit asset
+ * routed into its ERC-4626 vault (native→sDAI on Gnosis, USDC vault on the ETH
+ * L2s). Used on deploy chain chips so a creator sees each chain's flavor.
+ */
+export function yieldFlavorLabel(chainId?: number): string {
+  const cfg = chainConfig(chainId);
+  return cfg.yieldKind === "native"
+    ? `${cfg.chain.nativeCurrency.symbol} → sDAI`
+    : `${cfg.wrappedSymbol} vault`;
 }
 
 /** Block-explorer transaction URL for a chain. */

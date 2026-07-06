@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { keccak256, toHex, isAddress, zeroAddress, type Address } from "viem";
-import { useAccount } from "wagmi";
+import {
+  keccak256,
+  toHex,
+  isAddress,
+  zeroAddress,
+  type Address,
+  type Hex,
+} from "viem";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { Body, Button, Caption } from "@breadcoop/ui";
 import {
   ArrowRight,
@@ -17,20 +24,36 @@ import { TxStatus } from "@/components/dapp/tx-status";
 import { InstanceShareCard } from "@/components/dapp/instance-share-card";
 import { DurationInput } from "@/components/dapp/duration-input";
 import { useDeployInstance } from "@/hooks/use-deploy";
+import {
+  useDeployFamily,
+  usePendingFamily,
+  type FamilyDeployConfig,
+} from "@/hooks/use-deploy-family";
 import { useInstanceContext } from "@/components/instance-provider";
 import { durationToBlocks, shortenAddress } from "@/lib/format";
 import { instanceShareUrl } from "@/lib/instance";
-import { chainConfig } from "@/lib/chains";
+import {
+  CHAINS,
+  DEFAULT_CHAIN_ID,
+  chainConfig,
+  deployableChainIds,
+  isSupportedChain,
+  shortChainName,
+} from "@/lib/chains";
+import { computeFamilyId, loadFamilyDeployParams } from "@/lib/families";
 import { MAX_POINTS } from "@/lib/constants";
 import { isValidImageUri } from "@/lib/metadata";
 import { SafeImage } from "@/components/dapp/safe-image";
+import { ChainSelect } from "./_components/chain-select";
+import { ChainChecklist } from "./_components/chain-checklist";
+import { FamilySuccessCard } from "./_components/family-success-card";
 
 export default function DeployPage() {
   return (
     <div className="mx-auto max-w-lg">
       <PageHeader
         title="Deploy your instance"
-        subtitle="Launch a complete, self-owned staking instance in one transaction — on whichever supported chain your wallet is connected to. You become the admin of every contract."
+        subtitle="Launch a complete, self-owned staking instance in one transaction. Pick one chain, or several to form a cross-chain community that shares one signed ballot. You become the admin of every contract."
       />
       <DeployForm />
     </div>
@@ -38,21 +61,14 @@ export default function DeployPage() {
 }
 
 function DeployForm() {
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
   const router = useRouter();
+  const walletChainId = useChainId();
+  const { switchChain, isPending: switching } = useSwitchChain();
   const { addInstance } = useInstanceContext();
-  const {
-    deploy,
-    instance,
-    chainId,
-    canDeploy: deployerAvailable,
-    status,
-    isBusy,
-    isSuccess,
-    error,
-    hash,
-  } = useDeployInstance();
-  const chain = chainConfig(chainId);
+
+  // Single-chain (classic) deploy on the wallet's current chain.
+  const single = useDeployInstance();
 
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
@@ -63,6 +79,15 @@ function DeployForm() {
   const [maxPoints, setMaxPoints] = useState(MAX_POINTS.toString());
   const [customSalt, setCustomSalt] = useState("");
 
+  // "Add a chain" flow: /app/deploy?family=<id> prefills the exact config of an
+  // existing family so the deterministic familyId still matches. When set, the
+  // salt and creator are LOCKED to the stored record (any drift = orphan family).
+  const [extend, setExtend] = useState<{
+    familyId: Hex;
+    salt: Hex;
+    creator: Address;
+  } | null>(null);
+
   const [tokenImg, setTokenImg] = useState("");
   const [bannerImg, setBannerImg] = useState("");
   const tokenImgValid =
@@ -70,13 +95,69 @@ function DeployForm() {
   const bannerImgValid =
     bannerImg.trim() === "" || isValidImageUri(bannerImg.trim());
 
+  // Chain selection: preselect the wallet's chain (if deployable), else home.
+  const [selectedChains, setSelectedChains] = useState<number[]>([]);
+  const [multiReady, setMultiReady] = useState(false);
+  useEffect(() => {
+    const deployable = deployableChainIds();
+    const preferred =
+      isSupportedChain(walletChainId) && deployable.includes(walletChainId)
+        ? walletChainId
+        : (deployable[0] ?? DEFAULT_CHAIN_ID);
+    setSelectedChains([preferred]);
+  }, [walletChainId]);
+
+  // "Add a chain": prefill from ?family=<id>. Client-only (static export) — read
+  // the query the same way instance.ts does. Missing/unknown ids just no-op.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("family");
+    if (!raw) return;
+    const record = loadFamilyDeployParams(raw as Hex);
+    if (!record) return;
+    const p = record.params;
+    setName(p.tokenName);
+    setSymbol(p.tokenSymbol);
+    setOwner(p.owner);
+    setMaxPoints(p.maxVotingPoints);
+    setCycleSeconds(p.cycleSeconds);
+    setTokenImg(p.tokenImageURI);
+    setBannerImg(p.bannerImageURI);
+    setRegistryKind(p.registryKind === 1 ? "voting" : "admin");
+    setDistributionKind(
+      p.distributionKind === 1
+        ? "equal"
+        : p.distributionKind === 2
+          ? "split"
+          : "proportional",
+    );
+    setAdvanced(true);
+    setMultiReady(true);
+    setExtend({
+      familyId: record.familyId,
+      salt: record.salt,
+      creator: p.creator,
+    });
+  }, []);
+
+  const toggleChain = (chainId: number) =>
+    setSelectedChains((prev) =>
+      prev.includes(chainId)
+        ? prev.filter((c) => c !== chainId)
+        : [...prev, chainId],
+    );
+
+  // More than one chain (or the explicit toggle) makes it a cross-chain family.
+  const isMultiChain = selectedChains.length > 1 || multiReady;
+
   // Recipient governance: registry kind, founding recipients, proposal window.
+  // Democratic registries can't be multi-chain (recipient sets must stay synced).
   const [registryKind, setRegistryKind] = useState<"admin" | "voting">("admin");
   const [foundersText, setFoundersText] = useState("");
   const [expiryDays, setExpiryDays] = useState("7");
+  const democratic = registryKind === "voting" && !isMultiChain;
 
   // Yield distribution: how each cycle's yield is split among recipients.
-  // 0 = proportional (votes), 1 = equal, 2 = split (half votes / half equal).
   const [distributionKind, setDistributionKind] = useState<
     "proportional" | "equal" | "split"
   >("proportional");
@@ -84,19 +165,16 @@ function DeployForm() {
     distributionKind === "equal" ? 1 : distributionKind === "split" ? 2 : 0;
 
   const ownerValue = (owner.trim() || address || "") as string;
-  const cycleBlocks = durationToBlocks(cycleSeconds, chain.blockTimeSeconds);
   const cleanPoints = maxPoints.trim();
   const ownerValid = isAddress(ownerValue);
-  const cycleValid = cycleBlocks > 0n;
+  const cycleValid = cycleSeconds > 0;
   const pointsValid =
     /^\d+$/.test(cleanPoints) && BigInt(cleanPoints || "0") > 0n;
 
-  const democratic = registryKind === "voting";
   const typedFounders = foundersText
     .split(/[\s,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  // Default the founding cohort to the owner if none typed.
   const founders =
     typedFounders.length > 0 ? typedFounders : ownerValid ? [ownerValue] : [];
   const foundersValid =
@@ -106,8 +184,99 @@ function DeployForm() {
   const cleanExpiry = expiryDays.trim();
   const expiryValid = /^\d+$/.test(cleanExpiry) && Number(cleanExpiry) > 0;
 
-  const canDeploy =
-    deployerAvailable &&
+  const registryCode = democratic ? 1 : 0;
+
+  // Shared salt for the whole run — deterministic default, custom override.
+  // When extending an existing family, the salt is LOCKED to the stored value so
+  // the deterministic familyId matches its siblings.
+  const salt = useMemo(() => {
+    if (extend) return extend.salt;
+    if (customSalt.trim()) return keccak256(toHex(customSalt.trim()));
+    // A stable default keyed on the config so re-mounts don't reshuffle it, plus
+    // per-form entropy so distinct deploys never collide on the factory CREATE2.
+    return keccak256(
+      toHex(`${name.trim()}|${symbol.trim()}|${cycleSeconds}|${ownerValue}`),
+    );
+  }, [extend, customSalt, name, symbol, cycleSeconds, ownerValue]);
+
+  // familyId is CREATOR-scoped on-chain (CrowdStakeDeployer.deploy derives it
+  // from msg.sender), so the creator dimension is the CONNECTED WALLET — never
+  // the custom owner. A cross-chain deploy therefore requires a connected wallet.
+  const familyId = useMemo(() => {
+    if (!ownerValid || !address) return null;
+    return computeFamilyId(
+      address,
+      salt,
+      name.trim(),
+      symbol.trim(),
+      pointsValid ? BigInt(cleanPoints) : 0n,
+      registryCode,
+      distributionCode,
+    );
+  }, [
+    ownerValid,
+    address,
+    salt,
+    name,
+    symbol,
+    pointsValid,
+    cleanPoints,
+    registryCode,
+    distributionCode,
+  ]);
+
+  const familyConfig: FamilyDeployConfig | null = useMemo(() => {
+    // A cross-chain deploy needs a connected wallet: familyId (and the CREATE2
+    // base salt) are msg.sender-scoped on-chain, so `creator` MUST be the
+    // connected wallet, independent of any custom owner override.
+    if (!isMultiChain || !ownerValid || !address || selectedChains.length === 0)
+      return null;
+    return {
+      creator: address,
+      owner: ownerValue as Address,
+      tokenName: name.trim(),
+      tokenSymbol: symbol.trim(),
+      maxVotingPoints: pointsValid ? BigInt(cleanPoints) : 0n,
+      registryKind: registryCode,
+      distributionKind: distributionCode,
+      tokenImageURI: tokenImg.trim(),
+      bannerImageURI: bannerImg.trim(),
+      cycleSeconds,
+      salt,
+      chainIds: selectedChains,
+      primaryChainId: selectedChains.includes(walletChainId)
+        ? walletChainId
+        : selectedChains[0],
+    };
+  }, [
+    isMultiChain,
+    ownerValid,
+    address,
+    ownerValue,
+    name,
+    symbol,
+    pointsValid,
+    cleanPoints,
+    registryCode,
+    distributionCode,
+    tokenImg,
+    bannerImg,
+    cycleSeconds,
+    salt,
+    selectedChains,
+    walletChainId,
+  ]);
+
+  const family = useDeployFamily(familyConfig);
+
+  // Extending a family only works from the wallet that created it: familyId is
+  // msg.sender-scoped, so a different signer would silently mint an orphan.
+  const extendWalletMismatch =
+    extend !== null &&
+    isConnected &&
+    address?.toLowerCase() !== extend.creator.toLowerCase();
+
+  const commonValid =
     name.trim().length > 0 &&
     symbol.trim().length > 0 &&
     cycleValid &&
@@ -115,38 +284,31 @@ function DeployForm() {
     ownerValid &&
     tokenImgValid &&
     bannerImgValid &&
+    selectedChains.length > 0 &&
+    !extendWalletMismatch;
+
+  const singleChainId = selectedChains[0] ?? DEFAULT_CHAIN_ID;
+  const singleDeployable = Boolean(CHAINS[singleChainId]?.deployer);
+
+  const canDeploySingle =
+    commonValid &&
+    singleDeployable &&
     (!democratic || (foundersValid && expiryValid));
 
-  const onDeploy = () => {
-    if (!canDeploy) return;
-    // A custom salt makes the instance address deterministic; otherwise mix in
-    // name + per-attempt entropy so re-deploying the same config can't collide
-    // on the factory's CREATE2 (Create2Failed).
-    const salt = customSalt.trim()
-      ? keccak256(toHex(customSalt.trim()))
-      : keccak256(
-          toHex(
-            `${name.trim()}|${symbol.trim()}|${cycleBlocks}|${ownerValue}|${crypto.randomUUID()}`,
-          ),
-        );
-    void deploy({
-      owner: ownerValue as Address,
-      cycleLength: cycleBlocks,
-      tokenName: name.trim(),
-      tokenSymbol: symbol.trim(),
-      maxVotingPoints: BigInt(cleanPoints),
-      salt,
-      registryKind: democratic ? 1 : 0,
-      initialRecipients: democratic ? (founders as Address[]) : [],
-      proposalExpiry: democratic ? BigInt(Number(cleanExpiry) * 86400) : 0n,
-      distributionKind: distributionCode,
-      tokenImageURI: tokenImg.trim(),
-      bannerImageURI: bannerImg.trim(),
-    });
-  };
+  // Family success (all deployed / partial) → dedicated card.
+  if (isMultiChain && family.deployedCount > 0 && family.done) {
+    return (
+      <FamilySuccessCard
+        deployedRows={family.deployedRows}
+        chainCount={family.chainCount}
+        primaryChainId={familyConfig?.primaryChainId ?? singleChainId}
+      />
+    );
+  }
 
-  // Success — show the new instance and let the user switch to it.
-  if (isSuccess && instance) {
+  // Single-chain success — the classic card.
+  if (!isMultiChain && single.isSuccess && single.instance) {
+    const inst = single.instance;
     return (
       <Card>
         <p className="text-system-green flex items-center gap-2">
@@ -160,11 +322,10 @@ function DeployForm() {
           instance, ready to deposit, vote, and watch the yield grow.
         </Body>
 
-        {/* The whole point: a standalone, shareable page for this instance. */}
         <div className="mt-4">
           <InstanceShareCard
-            distributionManager={instance.distributionManager}
-            chainId={chainId}
+            distributionManager={inst.distributionManager}
+            chainId={single.chainId}
           />
         </div>
 
@@ -176,18 +337,17 @@ function DeployForm() {
           onClick={() => {
             addInstance({
               label: symbol.trim() || "New instance",
-              chainId,
-              addresses: instance,
+              chainId: single.chainId,
+              addresses: inst,
             });
             router.push(
-              instanceShareUrl(instance.distributionManager, chainId),
+              instanceShareUrl(inst.distributionManager, single.chainId),
             );
           }}
         >
           Use this instance
         </Button>
 
-        {/* Contract addresses — secondary, tucked away behind a disclosure. */}
         <details className="group mt-6">
           <summary className="text-surface-grey-2 hover:text-text-standard flex cursor-pointer items-center gap-1 text-sm font-medium select-none">
             <CaretRight
@@ -200,13 +360,13 @@ function DeployForm() {
           <dl className="mt-3 space-y-2">
             {(
               [
-                ["Token", instance.token],
-                ["Distribution Manager", instance.distributionManager],
-                ["Cycle Module", instance.cycleModule],
-                ["Voting Module", instance.votingModule],
-                ["Recipient Registry", instance.recipientRegistry],
-                ["Distribution Strategy", instance.distributionStrategy],
-                ["Voting Power Strategy", instance.votingPowerStrategy],
+                ["Token", inst.token],
+                ["Distribution Manager", inst.distributionManager],
+                ["Cycle Module", inst.cycleModule],
+                ["Voting Module", inst.votingModule],
+                ["Recipient Registry", inst.recipientRegistry],
+                ["Distribution Strategy", inst.distributionStrategy],
+                ["Voting Power Strategy", inst.votingPowerStrategy],
               ] as const
             ).map(([label, addr]) => (
               <div
@@ -225,8 +385,60 @@ function DeployForm() {
     );
   }
 
+  const onDeploySingle = () => {
+    if (!canDeploySingle) return;
+    // Classic deploys mix per-attempt entropy into the salt so re-deploying the
+    // same config can't collide on the factory CREATE2 (Create2Failed).
+    const classicSalt = customSalt.trim()
+      ? keccak256(toHex(customSalt.trim()))
+      : keccak256(
+          toHex(
+            `${name.trim()}|${symbol.trim()}|${cycleSeconds}|${ownerValue}|${crypto.randomUUID()}`,
+          ),
+        );
+    void single.deploy({
+      owner: ownerValue as Address,
+      cycleLength: durationToBlocks(
+        cycleSeconds,
+        CHAINS[singleChainId]?.blockTimeSeconds ?? 5,
+      ),
+      tokenName: name.trim(),
+      tokenSymbol: symbol.trim(),
+      maxVotingPoints: BigInt(cleanPoints),
+      salt: classicSalt,
+      registryKind: registryCode,
+      initialRecipients: democratic ? (founders as Address[]) : [],
+      proposalExpiry: democratic ? BigInt(Number(cleanExpiry) * 86400) : 0n,
+      distributionKind: distributionCode,
+      tokenImageURI: tokenImg.trim(),
+      bannerImageURI: bannerImg.trim(),
+      crossChain: false,
+    });
+  };
+
   return (
     <Card>
+      <PendingFamilyResume onResume={() => setMultiReady(true)} />
+
+      {extend && (
+        <div className="border-core-orange/30 bg-core-orange/5 mb-4 rounded-xl border p-4">
+          <Caption className="text-text-standard font-semibold">
+            Extending {name.trim() || "your community"}
+          </Caption>
+          <Body className="text-surface-grey-2 mt-1 text-sm">
+            Config is locked to the existing family so the new chain joins it.
+            Pick the chain(s) to add below, then deploy from the creator wallet
+            ({shortenAddress(extend.creator, 4)}).
+          </Body>
+          {extendWalletMismatch && (
+            <Caption className="text-system-warning mt-2 block">
+              Connected wallet doesn&apos;t match — switch to{" "}
+              {shortenAddress(extend.creator, 4)} to extend this family.
+            </Caption>
+          )}
+        </div>
+      )}
+
       <Field label="Token name">
         <Input
           value={name}
@@ -237,13 +449,47 @@ function DeployForm() {
       <Field label="Token symbol">
         <Input value={symbol} onChange={setSymbol} placeholder="ACME" />
       </Field>
+
+      <div className="mb-4">
+        <Caption className="text-surface-grey-2 mb-1.5 block">Chains</Caption>
+        <ChainSelect selected={selectedChains} onToggle={toggleChain} />
+        {selectedChains.length === 1 && (
+          <label className="text-surface-grey-2 mt-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={multiReady}
+              onChange={(e) => setMultiReady(e.target.checked)}
+              className="accent-core-orange"
+            />
+            Make this a multi-chain community (add more chains later)
+          </label>
+        )}
+        {isMultiChain && (
+          <Caption className="text-surface-grey mt-1.5 block">
+            Cross-chain community: one signed ballot lands on every chain, the
+            same ballot weighted by each member&apos;s stake on each chain.
+          </Caption>
+        )}
+      </div>
+
       <Field label="Cycle length">
         <DurationInput onChange={setCycleSeconds} />
         {cycleValid ? (
-          <Caption className="text-surface-grey mt-1 block">
-            ≈ {cycleBlocks.toString()} blocks on {chain.chain.name} (
-            {chain.blockTimeSeconds}s/block).
-          </Caption>
+          <div className="mt-1 space-y-0.5">
+            {selectedChains.map((chainId) => {
+              const cfg = chainConfig(chainId);
+              const blocks = durationToBlocks(
+                cycleSeconds,
+                cfg.blockTimeSeconds,
+              );
+              return (
+                <Caption key={chainId} className="text-surface-grey block">
+                  ≈ {blocks.toString()} blocks on {shortChainName(chainId)} (
+                  {cfg.blockTimeSeconds}s/block)
+                </Caption>
+              );
+            })}
+          </div>
         ) : (
           cycleSeconds > 0 && (
             <Caption className="text-system-red mt-1 block">
@@ -252,6 +498,7 @@ function DeployForm() {
           )
         )}
       </Field>
+
       <Field label="Owner / admin (defaults to you)">
         <Input
           value={owner}
@@ -271,21 +518,31 @@ function DeployForm() {
           Recipient governance
         </Caption>
         <div className="border-paper-2 inline-flex rounded-xl border p-1">
-          {(["admin", "voting"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setRegistryKind(k)}
-              className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
-                registryKind === k
-                  ? "bg-core-orange text-white"
-                  : "text-surface-grey-2 hover:text-text-standard"
-              }`}
-            >
-              {k === "admin" ? "Admin-managed" : "Democratic"}
-            </button>
-          ))}
+          {(["admin", "voting"] as const).map((k) => {
+            const disabledDemocratic = k === "voting" && isMultiChain;
+            return (
+              <button
+                key={k}
+                type="button"
+                disabled={disabledDemocratic}
+                onClick={() => !disabledDemocratic && setRegistryKind(k)}
+                className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
+                  registryKind === k && !disabledDemocratic
+                    ? "bg-core-orange text-white"
+                    : "text-surface-grey-2 hover:text-text-standard"
+                } ${disabledDemocratic ? "cursor-not-allowed opacity-40" : ""}`}
+              >
+                {k === "admin" ? "Admin-managed" : "Democratic"}
+              </button>
+            );
+          })}
         </div>
+        {isMultiChain && (
+          <Caption className="text-surface-grey mt-1.5 block">
+            Cross-chain communities need admin-managed recipients so the lists
+            can be kept in sync.
+          </Caption>
+        )}
         {democratic && (
           <div className="mt-4 space-y-4">
             <Field label="Founding recipients (one address per line)">
@@ -389,7 +646,7 @@ function DeployForm() {
               </Caption>
             )}
           </Field>
-          <Field label="Custom CREATE2 salt (optional — deterministic address)">
+          <Field label="Shared CREATE2 salt (optional — deterministic address)">
             <Input
               value={customSalt}
               onChange={setCustomSalt}
@@ -398,41 +655,110 @@ function DeployForm() {
             />
             <Caption className="text-surface-grey mt-1 block">
               Blank uses random entropy so repeat deploys never collide. A fixed
-              value makes the instance address reproducible.
+              value makes the instance address reproducible across chains.
             </Caption>
           </Field>
+          {isMultiChain && familyId && (
+            <div>
+              <Caption className="text-surface-grey-2 block">Family ID</Caption>
+              <Caption className="text-surface-grey mt-0.5 block font-mono break-all">
+                {familyId}
+              </Caption>
+            </div>
+          )}
         </div>
       )}
 
-      {!deployerAvailable && (
-        <Caption className="text-system-warning mt-4 block">
-          Deploys aren&apos;t available on {chain.chain.name} yet — switch your
-          wallet to a supported chain (currently Gnosis).
-        </Caption>
-      )}
-
-      <div className="mt-2">
-        <ActionButton
-          isLoading={isBusy}
-          disabled={!canDeploy}
-          onClick={onDeploy}
-        >
-          Deploy instance
-        </ActionButton>
-      </div>
-
-      <TxStatus
-        status={status}
-        hash={hash}
-        error={error}
-        successLabel="Instance deployed"
-      />
-      {isSuccess && !instance && (
-        <Caption className="text-system-warning mt-2 block">
-          The deploy transaction confirmed, but the instance addresses
-          couldn&apos;t be decoded. Check the transaction, and don&apos;t
-          re-submit (it may have already deployed).
-        </Caption>
+      {isMultiChain ? (
+        <FamilyDeploySection
+          canStart={commonValid && isConnected}
+          needsWallet={!isConnected}
+          family={family}
+          cycleSeconds={cycleSeconds}
+          onUseFamily={() => {
+            const primaryChainId =
+              familyConfig?.primaryChainId ?? singleChainId;
+            const label = symbol.trim() || "New family";
+            const withInstances = family.deployedRows.filter((r) => r.instance);
+            const primary =
+              withInstances.find((r) => r.chainId === primaryChainId) ??
+              withInstances[0];
+            if (!primary?.instance || !family.familyId) return;
+            // Register every sibling with family metadata so the switcher groups
+            // them; add the primary LAST so it becomes the active instance.
+            for (const r of withInstances) {
+              if (r.chainId === primary.chainId) continue;
+              addInstance({
+                label,
+                chainId: r.chainId,
+                addresses: r.instance!,
+                familyId: family.familyId,
+                primaryChainId,
+              });
+            }
+            addInstance({
+              label,
+              chainId: primary.chainId,
+              addresses: primary.instance,
+              familyId: family.familyId,
+              primaryChainId,
+            });
+            family.finish();
+            router.push(
+              instanceShareUrl(
+                primary.instance.distributionManager,
+                primary.chainId,
+              ),
+            );
+          }}
+        />
+      ) : (
+        <>
+          {!singleDeployable && (
+            <Caption className="text-system-warning mt-4 block">
+              Deploys aren&apos;t available on {shortChainName(singleChainId)}{" "}
+              yet — pick a supported chain.
+            </Caption>
+          )}
+          <div className="mt-2">
+            {isConnected && walletChainId !== singleChainId ? (
+              // Classic deploy runs on the wallet's chain — switch it to the
+              // selected chain first (ActionButton gates on the active INSTANCE
+              // chain, which isn't the deploy target here).
+              <Button
+                app="fund"
+                variant="primary"
+                className="w-full"
+                isLoading={switching}
+                onClick={() => switchChain({ chainId: singleChainId })}
+              >
+                Switch to {shortChainName(singleChainId)}
+              </Button>
+            ) : (
+              <ActionButton
+                chainless
+                isLoading={single.isBusy}
+                disabled={!canDeploySingle}
+                onClick={onDeploySingle}
+              >
+                Deploy instance
+              </ActionButton>
+            )}
+          </div>
+          <TxStatus
+            status={single.status}
+            hash={single.hash}
+            error={single.error}
+            successLabel="Instance deployed"
+          />
+          {single.isSuccess && !single.instance && (
+            <Caption className="text-system-warning mt-2 block">
+              The deploy transaction confirmed, but the instance addresses
+              couldn&apos;t be decoded. Check the transaction, and don&apos;t
+              re-submit (it may have already deployed).
+            </Caption>
+          )}
+        </>
       )}
 
       <Body className="text-surface-grey mt-6 text-sm">
@@ -447,6 +773,109 @@ function DeployForm() {
         .
       </Body>
     </Card>
+  );
+}
+
+/** The cross-chain deploy checklist + start/finish controls. */
+function FamilyDeploySection({
+  canStart,
+  needsWallet,
+  family,
+  cycleSeconds,
+  onUseFamily,
+}: {
+  canStart: boolean;
+  needsWallet: boolean;
+  family: ReturnType<typeof useDeployFamily>;
+  cycleSeconds: number;
+  onUseFamily: () => void;
+}) {
+  const started = family.rows.some((r) => r.state !== "idle");
+  return (
+    <div className="mt-4">
+      <Caption className="text-surface-grey-2 mb-2 block">
+        Deploy on each chain — independently retryable, resumable anytime
+      </Caption>
+      {needsWallet && (
+        <Caption className="text-system-warning mb-2 block">
+          Connect a wallet to start — cross-chain deploys are keyed to the
+          creating wallet, so every chain must be deployed from the same
+          account.
+        </Caption>
+      )}
+      <ChainChecklist
+        rows={family.rows}
+        cycleSeconds={cycleSeconds}
+        busy={family.anyBusy}
+        onDeploy={(c) => void family.deployChain(c)}
+        onSkip={family.skipChain}
+        onUnskip={family.unskipChain}
+      />
+      <div className="mt-4">
+        <ActionButton
+          chainless
+          isLoading={family.anyBusy}
+          disabled={!canStart || family.done}
+          onClick={() => void family.deployAll()}
+        >
+          {started
+            ? "Deploy remaining chains"
+            : "Deploy on all selected chains"}
+        </ActionButton>
+      </div>
+      {family.done && family.deployedCount > 0 && (
+        <Button
+          app="fund"
+          variant="secondary"
+          className="mt-3 w-full"
+          rightIcon={<ArrowRight weight="bold" />}
+          onClick={onUseFamily}
+        >
+          Use this community
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Resume banner when a multi-chain deploy was left unfinished. */
+function PendingFamilyResume({ onResume }: { onResume: () => void }) {
+  const pending = usePendingFamily();
+  const { address } = useAccount();
+  if (!pending) return null;
+  const remaining = Object.values(pending.chains).filter(
+    (c) => c.status !== "deployed",
+  ).length;
+  if (remaining === 0) return null;
+  const isCreator =
+    Boolean(address) &&
+    address?.toLowerCase() === pending.params.creator.toLowerCase();
+
+  return (
+    <div className="border-core-orange/30 bg-core-orange/5 mb-4 rounded-xl border p-4">
+      <Caption className="text-text-standard font-semibold">
+        Finish deploying {pending.params.tokenName || "your community"}
+      </Caption>
+      <Body className="text-surface-grey-2 mt-1 text-sm">
+        {remaining} chain{remaining === 1 ? "" : "s"} left. Cross-chain deploys
+        are creator-scoped — resume from the same wallet.
+      </Body>
+      {isCreator ? (
+        <Button
+          app="fund"
+          variant="secondary"
+          className="mt-3"
+          onClick={onResume}
+        >
+          Resume
+        </Button>
+      ) : (
+        <Caption className="text-system-warning mt-2 block">
+          Connect the creator wallet (
+          {shortenAddress(pending.params.creator, 4)}) to finish.
+        </Caption>
+      )}
+    </div>
   );
 }
 

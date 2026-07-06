@@ -86,8 +86,9 @@ contract VotingStreakNFTModuleTest is Test {
 
         // Deploy implementation and proxy
         VotingStreakBasisPointsModuleHarness impl = new VotingStreakBasisPointsModuleHarness();
-        bytes memory initData = abi.encodeWithSelector(
-            VotingStreakNFTModule.initialize.selector,
+        // encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
+        bytes memory initData = abi.encodeWithSignature(
+            "initialize(uint256,address[],address,address,address)",
             MAX_POINTS,
             strategies,
             address(distModule),

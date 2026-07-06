@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { type Address } from "viem";
+import { useAccount } from "wagmi";
 import { Body, Caption } from "@breadcoop/ui";
 import { CheckCircle, Plus, Minus } from "@phosphor-icons/react";
 import {
@@ -15,10 +16,15 @@ import { TxStatus } from "@/components/dapp/tx-status";
 import { useRecipients } from "@/hooks/use-recipients";
 import { useVote, useVotingState } from "@/hooks/use-voting";
 import { useCycle } from "@/hooks/use-cycle";
+import { useFamily } from "@/hooks/use-family";
+import { useCrossChainVote } from "@/hooks/use-cross-chain-vote";
 import { shortenAddress } from "@/lib/format";
-import { addressUrl } from "@/lib/chains";
+import { addressUrl, shortChainName } from "@/lib/chains";
 import { useActiveChainId } from "@/components/instance-provider";
 import { useAmountFormatter } from "@/components/demo-mode-provider";
+import { FamilyVoteCard } from "./_components/family-vote-card";
+import { FamilyExplainer } from "./_components/family-explainer";
+import { MultiChainVoteStatus } from "./_components/multi-chain-vote-status";
 
 export default function VotePage() {
   return (
@@ -27,14 +33,119 @@ export default function VotePage() {
         title="Vote"
         subtitle="Allocate your voting power across recipients. Yield is distributed proportionally to the community's weighted votes each cycle."
       />
-      <VoteForm />
+      <VoteGate />
+    </div>
+  );
+}
+
+/**
+ * The vote page's mode is gated on the `familyId()` read: classic instances get
+ * the single-chain flow (unchanged), multi-chain families get the sign-once
+ * cross-chain flow. A skeleton renders until the read resolves so we never
+ * flash the wrong UI.
+ */
+function VoteGate() {
+  const family = useFamily();
+
+  // familyId not yet known — show a skeleton rather than the wrong mode.
+  if (family.familyId === null && family.isLoading) {
+    return <VoteSkeleton />;
+  }
+  if (family.isFamily) {
+    return <FamilyVoteForm family={family} />;
+  }
+  return <VoteForm />;
+}
+
+function VoteSkeleton() {
+  return (
+    <div className="animate-pulse space-y-4">
+      <div className="bg-paper-1 h-20 rounded-2xl" />
+      <div className="bg-paper-1 h-32 rounded-2xl" />
+      <div className="bg-paper-1 h-32 rounded-2xl" />
+    </div>
+  );
+}
+
+/** Shared allocation grid used by both the classic and family forms. */
+function AllocationGrid({
+  recipients,
+  distribution,
+  weights,
+  setWeight,
+  maxStep,
+  disabled,
+  chainLabeled,
+}: {
+  recipients: readonly string[];
+  distribution: readonly bigint[];
+  weights: Record<string, number>;
+  setWeight: (addr: string, v: number) => void;
+  maxStep: number;
+  disabled?: boolean;
+  /** Family mode: bars are per-chain, so label "Current on <chain>". */
+  chainLabeled?: boolean;
+}) {
+  const chainId = useActiveChainId();
+  const currentLabel = chainLabeled
+    ? `Current on ${shortChainName(chainId)}`
+    : "Current";
+  const totalVotes = useMemo(
+    () => distribution.reduce((a, b) => a + b, 0n),
+    [distribution],
+  );
+  const totalPts = recipients.reduce((s, r) => s + (weights[r] ?? 0), 0);
+
+  return (
+    <div className="space-y-4">
+      {recipients.map((r, i) => {
+        const current = distribution[i] ?? 0n;
+        const share =
+          totalVotes > 0n ? Number((current * 10000n) / totalVotes) / 100 : 0;
+        const pts = weights[r] ?? 0;
+        const alloc = totalPts > 0 ? (pts / totalPts) * 100 : 0;
+        return (
+          <Card key={r}>
+            <div className="flex items-center justify-between">
+              <a
+                href={addressUrl(r, chainId)}
+                target="_blank"
+                rel="noreferrer"
+                className="font-breadDisplay text-text-standard hover:text-core-orange font-bold"
+              >
+                {shortenAddress(r as Address, 6)}
+              </a>
+              <Caption className="text-surface-grey-2">
+                {currentLabel}: {share.toFixed(1)}%
+              </Caption>
+            </div>
+            <div className="mt-2">
+              <ProgressBar value={share / 100} />
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <span className="text-text-standard text-sm">
+                Your allocation:{" "}
+                <span className="font-breadDisplay text-core-orange font-bold">
+                  {alloc.toFixed(0)}%
+                </span>
+              </span>
+              <Stepper
+                value={pts}
+                disabled={disabled}
+                onChange={(v) =>
+                  setWeight(r, Math.max(0, Math.min(maxStep, v)))
+                }
+              />
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }
 
 function VoteForm() {
   const fmt = useAmountFormatter();
-  const chainId = useActiveChainId();
   const { recipients } = useRecipients();
   const voting = useVotingState();
   const cycle = useCycle();
@@ -45,11 +156,6 @@ function VoteForm() {
 
   const setWeight = (addr: string, v: number) =>
     setWeights((w) => ({ ...w, [addr]: v }));
-
-  const totalVotes = useMemo(
-    () => voting.distribution.reduce((a, b) => a + b, 0n),
-    [voting.distribution],
-  );
 
   useEffect(() => {
     if (tx.isSuccess) voting.refetch();
@@ -120,50 +226,14 @@ function VoteForm() {
         </button>
       </div>
 
-      <div className="space-y-4">
-        {recipients.map((r, i) => {
-          const current = voting.distribution[i] ?? 0n;
-          const share =
-            totalVotes > 0n ? Number((current * 10000n) / totalVotes) / 100 : 0;
-          const pts = weights[r] ?? 0;
-          const alloc = totalPts > 0 ? (pts / totalPts) * 100 : 0;
-          return (
-            <Card key={r}>
-              <div className="flex items-center justify-between">
-                <a
-                  href={addressUrl(r, chainId)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-breadDisplay text-text-standard hover:text-core-orange font-bold"
-                >
-                  {shortenAddress(r as Address, 6)}
-                </a>
-                <Caption className="text-surface-grey-2">
-                  Current: {share.toFixed(1)}%
-                </Caption>
-              </div>
-              <div className="mt-2">
-                <ProgressBar value={share / 100} />
-              </div>
-              <div className="mt-4 flex items-center justify-between gap-4">
-                <span className="text-text-standard text-sm">
-                  Your allocation:{" "}
-                  <span className="font-breadDisplay text-core-orange font-bold">
-                    {alloc.toFixed(0)}%
-                  </span>
-                </span>
-                <Stepper
-                  value={pts}
-                  disabled={voting.hasVoted}
-                  onChange={(v) =>
-                    setWeight(r, Math.max(0, Math.min(maxStep, v)))
-                  }
-                />
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+      <AllocationGrid
+        recipients={recipients}
+        distribution={voting.distribution}
+        weights={weights}
+        setWeight={setWeight}
+        maxStep={maxStep}
+        disabled={voting.hasVoted}
+      />
 
       <div className="mt-6">
         <ActionButton
@@ -204,6 +274,138 @@ function VoteForm() {
         Points are relative — each recipient&apos;s share is its points ÷ your
         total points, weighted by your voting power. Use the +/− steppers or
         type a value.
+      </Body>
+    </div>
+  );
+}
+
+/**
+ * Multi-chain family vote: ONE signature counts on every family chain, weighted
+ * by the wallet's per-chain stake. Steppers are never locked by hasVoted (recast
+ * is a first-class action), and delivery status is per chain.
+ */
+function FamilyVoteForm({ family }: { family: ReturnType<typeof useFamily> }) {
+  const { address } = useAccount();
+  const chainId = useActiveChainId();
+  const { recipients } = useRecipients();
+  const voting = useVotingState();
+  const ccv = useCrossChainVote(family);
+
+  const [weights, setWeights] = useState<Record<string, number>>({});
+  const setWeight = (addr: string, v: number) =>
+    setWeights((w) => ({ ...w, [addr]: v }));
+
+  // On settle, refetch every chain's voting state so rows reflect the landing.
+  useEffect(() => {
+    if (ccv.phase === "done") family.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ccv.phase]);
+
+  if (recipients.length === 0) {
+    return (
+      <EmptyState>
+        No recipients have been added yet. An admin must add funding recipients
+        before voting can begin.
+      </EmptyState>
+    );
+  }
+
+  const totalPts = recipients.reduce((s, r) => s + (weights[r] ?? 0), 0);
+  const anyAllocated = totalPts > 0;
+  // Points map to the ACTIVE chain's registry order; siblings re-map by identity.
+  const points = recipients.map((r) => BigInt(weights[r] ?? 0));
+  const recipientList = recipients as readonly Address[];
+  const maxStep = Math.min(99, Number(voting.maxPoints));
+
+  // The active chain's row tells us whether this is a fresh vote or a recast.
+  const active = family.perChain.find((c) => c.chainId === chainId);
+  const alreadyVoted = active?.hasVoted ?? false;
+
+  // Names of the chains this ballot will actually target (found + has power).
+  const targetChains = family.perChain
+    .filter((c) => c.status === "found")
+    .map((c) => shortChainName(c.chainId));
+  const chainListText =
+    targetChains.length <= 1
+      ? (targetChains[0] ?? "this chain")
+      : `${targetChains.slice(0, -1).join(", ")} and ${targetChains.at(-1)}`;
+
+  const distributeEqually = () => {
+    const w: Record<string, number> = {};
+    recipients.forEach((r) => (w[r] = 1));
+    setWeights(w);
+  };
+
+  return (
+    <div>
+      <FamilyExplainer />
+
+      <FamilyVoteCard
+        perChain={family.perChain}
+        onRetry={() => family.refetch({ force: true })}
+      />
+
+      <div className="mb-3 flex items-center justify-between">
+        <Caption className="text-surface-grey-2">
+          Allocate points — each recipient&apos;s share is relative
+        </Caption>
+        <button
+          onClick={distributeEqually}
+          className="text-core-orange text-sm font-semibold hover:underline"
+        >
+          Distribute equally
+        </button>
+      </div>
+
+      <AllocationGrid
+        recipients={recipients}
+        distribution={voting.distribution}
+        weights={weights}
+        setWeight={setWeight}
+        maxStep={maxStep}
+        chainLabeled
+      />
+
+      <div className="mt-6">
+        <Caption className="text-surface-grey-2 mb-2 block text-center">
+          One signature casts this vote on {chainListText} — anyone can deliver
+          it; valid for 72 hours.
+        </Caption>
+        <ActionButton
+          chainless
+          isLoading={ccv.isBusy}
+          disabled={!anyAllocated || !address}
+          onClick={() => ccv.sign(points, recipientList)}
+        >
+          {alreadyVoted ? "Update vote" : "Cast vote"}
+        </ActionButton>
+      </div>
+
+      {!anyAllocated && (
+        <Caption className="text-surface-grey mt-2 block text-center">
+          Allocate weight to at least one recipient.
+        </Caption>
+      )}
+      {ccv.error && (
+        <Caption className="text-system-red mt-2 block text-center">
+          {ccv.error}
+        </Caption>
+      )}
+
+      <MultiChainVoteStatus
+        rows={ccv.rows}
+        phase={ccv.phase}
+        relayDown={ccv.relayDown}
+        submitting={ccv.submitting}
+        payload={ccv.payload}
+        onSubmitOnChain={ccv.submitOnChain}
+        onRetryRelay={ccv.retryRelay}
+      />
+
+      <Body className="text-surface-grey mt-6 text-sm">
+        Results can differ per chain — voting power is per-chain stake. Your
+        points are relative: each recipient&apos;s share is its points ÷ your
+        total points.
       </Body>
     </div>
   );

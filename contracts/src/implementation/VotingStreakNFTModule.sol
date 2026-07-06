@@ -127,7 +127,7 @@ contract VotingStreakNFTModule is BasisPointsVotingModule {
     /// @param voter Address of the voter
     /// @param points Array of basis points for allocation across recipients
     /// @param votingPower Total voting power of the voter
-    function _processVote(address voter, uint256[] calldata points, uint256 votingPower) internal override {
+    function _processVote(address voter, uint256[] memory points, uint256 votingPower) internal override {
         // Step 1: Execute standard voting math via parent
         super._processVote(voter, points, votingPower);
 

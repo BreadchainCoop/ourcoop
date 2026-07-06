@@ -30,6 +30,7 @@ import {
 } from "@/lib/format";
 import { DurationInput } from "@/components/dapp/duration-input";
 import { useActiveChain } from "@/hooks/use-chain";
+import { FamilyChainsCard } from "./_components/family-chains-card";
 
 export default function AdminPage() {
   return (
@@ -128,6 +129,7 @@ function AdminOnly() {
   }
   return (
     <>
+      <FamilyChainsCard />
       <InstanceMetadataCard />
       <CycleLength />
       <YieldClaimer />
