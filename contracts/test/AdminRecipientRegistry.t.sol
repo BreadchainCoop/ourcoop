@@ -17,7 +17,7 @@ contract AdminRecipientRegistryTest is TestWrapper {
 
     function setUp() public {
         AdminRecipientRegistry impl = new AdminRecipientRegistry();
-        bytes memory initData = abi.encodeCall(AdminRecipientRegistry.initialize, (ADMIN));
+        bytes memory initData = abi.encodeWithSignature("initialize(address)", ADMIN);
         registry = AdminRecipientRegistry(address(new ERC1967Proxy(address(impl), initData)));
     }
 

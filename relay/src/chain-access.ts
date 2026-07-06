@@ -17,8 +17,8 @@ import {
   type Transport,
 } from "viem";
 import { arbitrum, gnosis, mainnet, optimism } from "viem/chains";
-import { deployerAbi, votingModuleAbi } from "./abi.js";
-import type { FamilyInstance } from "./store.js";
+import { deployerAbi, registryAbi, votingModuleAbi } from "./abi.js";
+import type { ActionKind, FamilyInstance } from "./store.js";
 
 /** A contract revert decoded to its custom-error name. */
 export class RevertError extends Error {
@@ -40,6 +40,48 @@ export interface CastVoteArgs {
   signature: Hex;
 }
 
+export interface RegistryUpdateArgs {
+  admin: Address;
+  recipients: Address[];
+  nonce: bigint;
+  deadline: bigint;
+  signature: Hex;
+}
+
+export interface ProposalArgs {
+  proposer: Address;
+  candidate: Address;
+  isAddition: boolean;
+  electorate: Address[];
+  expiresAt: bigint;
+  nonce: bigint;
+  signature: Hex;
+}
+
+export interface ProposalVoteArgs {
+  voter: Address;
+  proposalKey: Hex;
+  deadline: bigint;
+  signature: Hex;
+}
+
+/** Kind-tagged delivery arguments — the worker's single dispatch surface. */
+export type DeliveryArgs =
+  | { kind: "vote"; args: CastVoteArgs }
+  | { kind: "registry-update"; args: RegistryUpdateArgs }
+  | { kind: "proposal"; args: ProposalArgs }
+  | { kind: "proposal-vote"; args: ProposalVoteArgs };
+
+/** On-chain cross-chain proposal view (undefined when the key doesn't exist). */
+export interface CrossChainProposalView {
+  candidate: Address;
+  isAddition: boolean;
+  executed: boolean;
+  expiresAt: bigint;
+  voteCount: bigint;
+  requiredVotes: bigint;
+}
+
 export interface FeeEstimate {
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
@@ -54,7 +96,9 @@ export interface Receipt {
 
 /**
  * The narrow chain surface the relay uses. Production wraps viem clients;
- * tests inject fakes.
+ * tests inject fakes. Delivery is kind-dispatched: `simulate`/`send` take a
+ * DeliveryArgs and route to the right entrypoint on the right target contract
+ * (votingModule for votes, registry for the three registry-governance kinds).
  */
 export interface ChainAccess {
   getBlockNumber(): Promise<bigint>;
@@ -66,14 +110,30 @@ export interface ChainAccess {
     deployer: Address,
     familyId: Hex,
   ): Promise<FamilyInstance | null>;
-  readFamilyId(votingModule: Address): Promise<Hex>;
+  /** familyId() on a voting module OR a registry — both share the getter. */
+  readFamilyId(target: Address): Promise<Hex>;
+  // ── vote reads ──
   lastCrossChainNonce(votingModule: Address, voter: Address): Promise<bigint>;
   getVotingPower(votingModule: Address, voter: Address): Promise<bigint>;
+  // ── registry reads ──
+  lastRegistryUpdateNonce(registry: Address): Promise<bigint>;
+  getRecipients(registry: Address): Promise<Address[]>;
+  /** undefined when the proposalKey does not exist on this chain. */
+  getCrossChainProposal(
+    registry: Address,
+    proposalKey: Hex,
+  ): Promise<CrossChainProposalView | undefined>;
+  hasVotedCrossChain(
+    registry: Address,
+    proposalKey: Hex,
+    voter: Address,
+  ): Promise<boolean>;
+  // ── kind-dispatched delivery ──
   /** Simulates + estimates gas; throws RevertError on decoded revert. */
-  simulateCastVote(votingModule: Address, args: CastVoteArgs): Promise<bigint>;
-  sendCastVote(
-    votingModule: Address,
-    args: CastVoteArgs,
+  simulate(target: Address, delivery: DeliveryArgs): Promise<bigint>;
+  send(
+    target: Address,
+    delivery: DeliveryArgs,
     opts: { nonce: number; gas: bigint } & FeeEstimate,
   ): Promise<Hex>;
   getReceipt(txHash: Hex): Promise<Receipt | null>;
@@ -117,6 +177,63 @@ export function createChainAccess(opts: {
     account: opts.account,
   });
   return new ViemChainAccess(publicClient, walletClient, opts.account);
+}
+
+/** The write function name + arg tuple for one kind of delivery. */
+function writeCall(delivery: DeliveryArgs): {
+  abi: typeof votingModuleAbi | typeof registryAbi;
+  functionName: string;
+  args: readonly unknown[];
+} {
+  switch (delivery.kind) {
+    case "vote": {
+      const a = delivery.args;
+      return {
+        abi: votingModuleAbi,
+        functionName: "castCrossChainVote",
+        args: [
+          a.voter,
+          a.points,
+          a.recipients,
+          a.nonce,
+          a.deadline,
+          a.signature,
+        ],
+      };
+    }
+    case "registry-update": {
+      const a = delivery.args;
+      return {
+        abi: registryAbi,
+        functionName: "applyCrossChainRegistryUpdate",
+        args: [a.admin, a.recipients, a.nonce, a.deadline, a.signature],
+      };
+    }
+    case "proposal": {
+      const a = delivery.args;
+      return {
+        abi: registryAbi,
+        functionName: "createCrossChainProposal",
+        args: [
+          a.proposer,
+          a.candidate,
+          a.isAddition,
+          a.electorate,
+          a.expiresAt,
+          a.nonce,
+          a.signature,
+        ],
+      };
+    }
+    case "proposal-vote": {
+      const a = delivery.args;
+      return {
+        abi: registryAbi,
+        functionName: "castCrossChainProposalVote",
+        args: [a.voter, a.proposalKey, a.deadline, a.signature],
+      };
+    }
+  }
 }
 
 class ViemChainAccess implements ChainAccess {
@@ -182,9 +299,9 @@ class ViemChainAccess implements ChainAccess {
     return instance.votingModule === zeroAddress ? null : instance;
   }
 
-  readFamilyId(votingModule: Address): Promise<Hex> {
+  readFamilyId(target: Address): Promise<Hex> {
     return this.publicClient.readContract({
-      address: votingModule,
+      address: target,
       abi: votingModuleAbi,
       functionName: "familyId",
     });
@@ -208,25 +325,74 @@ class ViemChainAccess implements ChainAccess {
     });
   }
 
-  async simulateCastVote(
-    votingModule: Address,
-    args: CastVoteArgs,
-  ): Promise<bigint> {
+  lastRegistryUpdateNonce(registry: Address): Promise<bigint> {
+    return this.publicClient.readContract({
+      address: registry,
+      abi: registryAbi,
+      functionName: "lastRegistryUpdateNonce",
+    });
+  }
+
+  getRecipients(registry: Address): Promise<Address[]> {
+    return this.publicClient
+      .readContract({
+        address: registry,
+        abi: registryAbi,
+        functionName: "getRecipients",
+      })
+      .then((r) => [...r]);
+  }
+
+  async getCrossChainProposal(
+    registry: Address,
+    proposalKey: Hex,
+  ): Promise<CrossChainProposalView | undefined> {
+    try {
+      const out = await this.publicClient.readContract({
+        address: registry,
+        abi: registryAbi,
+        functionName: "getCrossChainProposal",
+        args: [proposalKey],
+      });
+      return {
+        candidate: out[0],
+        isAddition: out[1],
+        executed: out[2],
+        expiresAt: out[3],
+        voteCount: out[4],
+        requiredVotes: out[5],
+      };
+    } catch (e) {
+      // ProposalNotFound reverts — that is a valid "does not exist yet" answer.
+      const revert = toRevertError(e);
+      if (revert?.errorName === "ProposalNotFound") return undefined;
+      throw e;
+    }
+  }
+
+  hasVotedCrossChain(
+    registry: Address,
+    proposalKey: Hex,
+    voter: Address,
+  ): Promise<boolean> {
+    return this.publicClient.readContract({
+      address: registry,
+      abi: registryAbi,
+      functionName: "hasVotedCrossChain",
+      args: [proposalKey, voter],
+    });
+  }
+
+  async simulate(target: Address, delivery: DeliveryArgs): Promise<bigint> {
+    const call = writeCall(delivery);
     try {
       return await this.publicClient.estimateContractGas({
         account: this.account,
-        address: votingModule,
-        abi: votingModuleAbi,
-        functionName: "castCrossChainVote",
-        args: [
-          args.voter,
-          args.points,
-          args.recipients,
-          args.nonce,
-          args.deadline,
-          args.signature,
-        ],
-      });
+        address: target,
+        abi: call.abi,
+        functionName: call.functionName,
+        args: call.args,
+      } as Parameters<PublicClient["estimateContractGas"]>[0]);
     } catch (e) {
       const revert = toRevertError(e);
       if (revert) throw revert;
@@ -234,28 +400,25 @@ class ViemChainAccess implements ChainAccess {
     }
   }
 
-  async sendCastVote(
-    votingModule: Address,
-    args: CastVoteArgs,
+  async send(
+    target: Address,
+    delivery: DeliveryArgs,
     opts: { nonce: number; gas: bigint } & FeeEstimate,
   ): Promise<Hex> {
+    const call = writeCall(delivery);
+    // The ABI + functionName are chosen at runtime, so viem's per-function
+    // inference cannot apply; cast the options through unknown (the call shape
+    // is correct, only the compile-time overload resolution is defeated).
     return this.walletClient.writeContract({
-      address: votingModule,
-      abi: votingModuleAbi,
-      functionName: "castCrossChainVote",
-      args: [
-        args.voter,
-        args.points,
-        args.recipients,
-        args.nonce,
-        args.deadline,
-        args.signature,
-      ],
+      address: target,
+      abi: call.abi,
+      functionName: call.functionName,
+      args: call.args,
       nonce: opts.nonce,
       gas: opts.gas,
       maxFeePerGas: opts.maxFeePerGas,
       maxPriorityFeePerGas: opts.maxPriorityFeePerGas,
-    });
+    } as unknown as Parameters<WalletClient["writeContract"]>[0]);
   }
 
   async getReceipt(txHash: Hex): Promise<Receipt | null> {
@@ -293,6 +456,17 @@ class ViemChainAccess implements ChainAccess {
       maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
     };
   }
+}
+
+/**
+ * The on-chain target for a delivery kind on a resolved family instance: the
+ * votingModule for votes, the registry for the three registry-governance kinds.
+ */
+export function resolveTarget(
+  kind: ActionKind,
+  instance: FamilyInstance,
+): Address {
+  return kind === "vote" ? instance.votingModule : instance.registry;
 }
 
 /** Decode a viem contract error into a RevertError, if it is one. */

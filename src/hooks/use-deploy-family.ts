@@ -8,7 +8,7 @@ import { CHAINS } from "@/lib/chains";
 import { publicClientFor, type InstanceAddresses } from "@/lib/instance";
 import { parseTxError } from "@/hooks/use-tx";
 import {
-  computeFamilyId,
+  familyIdForConfig,
   loadPendingFamily,
   savePendingFamily,
   clearPendingFamily,
@@ -45,6 +45,10 @@ export interface FamilyDeployConfig {
   maxVotingPoints: bigint;
   registryKind: number;
   distributionKind: number;
+  /** Democratic families only: the founding cohort (committed to the familyId). */
+  initialRecipients: Address[];
+  /** Democratic families only: seconds a proposal stays open. 0n for admin. */
+  proposalExpiry: bigint;
   tokenImageURI: string;
   bannerImageURI: string;
   /** ONE duration; each chain's cycleLength derives from its block time. */
@@ -95,6 +99,8 @@ function serializeParams(cfg: FamilyDeployConfig): PendingFamilyParams {
     maxVotingPoints: cfg.maxVotingPoints.toString(),
     registryKind: cfg.registryKind,
     distributionKind: cfg.distributionKind,
+    initialRecipients: cfg.initialRecipients,
+    proposalExpiry: cfg.proposalExpiry.toString(),
     tokenImageURI: cfg.tokenImageURI,
     bannerImageURI: cfg.bannerImageURI,
   };
@@ -114,15 +120,17 @@ export function useDeployFamily(config: FamilyDeployConfig | null) {
   const { writeContractAsync } = useWriteContract();
 
   const familyId: Hex | null = config
-    ? computeFamilyId(
-        config.creator,
-        config.salt,
-        config.tokenName,
-        config.tokenSymbol,
-        config.maxVotingPoints,
-        config.registryKind,
-        config.distributionKind,
-      )
+    ? familyIdForConfig({
+        creator: config.creator,
+        salt: config.salt,
+        tokenName: config.tokenName,
+        tokenSymbol: config.tokenSymbol,
+        maxVotingPoints: config.maxVotingPoints,
+        registryKind: config.registryKind,
+        distributionKind: config.distributionKind,
+        initialRecipients: config.initialRecipients,
+        proposalExpiry: config.proposalExpiry,
+      })
     : null;
 
   const [rows, setRowsState] = useState<FamilyDeployRow[]>([]);
@@ -270,8 +278,8 @@ export function useDeployFamily(config: FamilyDeployConfig | null) {
               maxVotingPoints: cfg.maxVotingPoints,
               salt: cfg.salt,
               registryKind: cfg.registryKind,
-              initialRecipients: [],
-              proposalExpiry: 0n,
+              initialRecipients: cfg.initialRecipients,
+              proposalExpiry: cfg.proposalExpiry,
               distributionKind: cfg.distributionKind,
               tokenImageURI: cfg.tokenImageURI,
               bannerImageURI: cfg.bannerImageURI,

@@ -40,7 +40,7 @@ import {
   isSupportedChain,
   shortChainName,
 } from "@/lib/chains";
-import { computeFamilyId, loadFamilyDeployParams } from "@/lib/families";
+import { familyIdForConfig, loadFamilyDeployParams } from "@/lib/families";
 import { MAX_POINTS } from "@/lib/constants";
 import { isValidImageUri } from "@/lib/metadata";
 import { SafeImage } from "@/components/dapp/safe-image";
@@ -124,6 +124,12 @@ function DeployForm() {
     setTokenImg(p.tokenImageURI);
     setBannerImg(p.bannerImageURI);
     setRegistryKind(p.registryKind === 1 ? "voting" : "admin");
+    // Democratic families: founders + expiry are committed into the familyId
+    // (votingFamilyIdOf) — dropping them here would mint an orphan family.
+    if (p.registryKind === 1) {
+      setFoundersText(p.initialRecipients.join(", "));
+      setExpiryDays(String(Number(p.proposalExpiry) / 86400));
+    }
     setDistributionKind(
       p.distributionKind === 1
         ? "equal"
@@ -151,11 +157,13 @@ function DeployForm() {
   const isMultiChain = selectedChains.length > 1 || multiReady;
 
   // Recipient governance: registry kind, founding recipients, proposal window.
-  // Democratic registries can't be multi-chain (recipient sets must stay synced).
+  // Democratic registries are now multi-chain viable — proposals and votes are
+  // signed once and replayed cross-chain, and the founding cohort is committed
+  // into the familyId so every sibling starts from the same electorate.
   const [registryKind, setRegistryKind] = useState<"admin" | "voting">("admin");
   const [foundersText, setFoundersText] = useState("");
   const [expiryDays, setExpiryDays] = useState("7");
-  const democratic = registryKind === "voting" && !isMultiChain;
+  const democratic = registryKind === "voting";
 
   // Yield distribution: how each cycle's yield is split among recipients.
   const [distributionKind, setDistributionKind] = useState<
@@ -186,6 +194,21 @@ function DeployForm() {
 
   const registryCode = democratic ? 1 : 0;
 
+  // Democratic families commit their founding cohort + expiry into the familyId
+  // (and pass them to deploy); admin families use [] / 0 (byte-identical to old).
+  // Memoized so the derived familyId/config don't churn every keystroke.
+  const foundersKey = founders.join(",");
+  const initialRecipients = useMemo<Address[]>(
+    () => (democratic ? (founders as Address[]) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [democratic, foundersKey],
+  );
+  const proposalExpirySeconds = useMemo(
+    () =>
+      democratic && expiryValid ? BigInt(Number(cleanExpiry) * 86400) : 0n,
+    [democratic, expiryValid, cleanExpiry],
+  );
+
   // Shared salt for the whole run — deterministic default, custom override.
   // When extending an existing family, the salt is LOCKED to the stored value so
   // the deterministic familyId matches its siblings.
@@ -204,15 +227,17 @@ function DeployForm() {
   // the custom owner. A cross-chain deploy therefore requires a connected wallet.
   const familyId = useMemo(() => {
     if (!ownerValid || !address) return null;
-    return computeFamilyId(
-      address,
+    return familyIdForConfig({
+      creator: address,
       salt,
-      name.trim(),
-      symbol.trim(),
-      pointsValid ? BigInt(cleanPoints) : 0n,
-      registryCode,
-      distributionCode,
-    );
+      tokenName: name.trim(),
+      tokenSymbol: symbol.trim(),
+      maxVotingPoints: pointsValid ? BigInt(cleanPoints) : 0n,
+      registryKind: registryCode,
+      distributionKind: distributionCode,
+      initialRecipients,
+      proposalExpiry: proposalExpirySeconds,
+    });
   }, [
     ownerValid,
     address,
@@ -223,6 +248,8 @@ function DeployForm() {
     cleanPoints,
     registryCode,
     distributionCode,
+    initialRecipients,
+    proposalExpirySeconds,
   ]);
 
   const familyConfig: FamilyDeployConfig | null = useMemo(() => {
@@ -239,6 +266,8 @@ function DeployForm() {
       maxVotingPoints: pointsValid ? BigInt(cleanPoints) : 0n,
       registryKind: registryCode,
       distributionKind: distributionCode,
+      initialRecipients,
+      proposalExpiry: proposalExpirySeconds,
       tokenImageURI: tokenImg.trim(),
       bannerImageURI: bannerImg.trim(),
       cycleSeconds,
@@ -259,6 +288,8 @@ function DeployForm() {
     cleanPoints,
     registryCode,
     distributionCode,
+    initialRecipients,
+    proposalExpirySeconds,
     tokenImg,
     bannerImg,
     cycleSeconds,
@@ -290,10 +321,10 @@ function DeployForm() {
   const singleChainId = selectedChains[0] ?? DEFAULT_CHAIN_ID;
   const singleDeployable = Boolean(CHAINS[singleChainId]?.deployer);
 
-  const canDeploySingle =
-    commonValid &&
-    singleDeployable &&
-    (!democratic || (foundersValid && expiryValid));
+  // Democratic deploys (single- or multi-chain) also need valid founders + expiry.
+  const democraticValid = !democratic || (foundersValid && expiryValid);
+
+  const canDeploySingle = commonValid && singleDeployable && democraticValid;
 
   // Family success (all deployed / partial) → dedicated card.
   if (isMultiChain && family.deployedCount > 0 && family.done) {
@@ -518,29 +549,32 @@ function DeployForm() {
           Recipient governance
         </Caption>
         <div className="border-paper-2 inline-flex rounded-xl border p-1">
-          {(["admin", "voting"] as const).map((k) => {
-            const disabledDemocratic = k === "voting" && isMultiChain;
-            return (
-              <button
-                key={k}
-                type="button"
-                disabled={disabledDemocratic}
-                onClick={() => !disabledDemocratic && setRegistryKind(k)}
-                className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
-                  registryKind === k && !disabledDemocratic
-                    ? "bg-core-orange text-white"
-                    : "text-surface-grey-2 hover:text-text-standard"
-                } ${disabledDemocratic ? "cursor-not-allowed opacity-40" : ""}`}
-              >
-                {k === "admin" ? "Admin-managed" : "Democratic"}
-              </button>
-            );
-          })}
+          {(["admin", "voting"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setRegistryKind(k)}
+              className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
+                registryKind === k
+                  ? "bg-core-orange text-white"
+                  : "text-surface-grey-2 hover:text-text-standard"
+              }`}
+            >
+              {k === "admin" ? "Admin-managed" : "Democratic"}
+            </button>
+          ))}
         </div>
-        {isMultiChain && (
+        {isMultiChain && democratic && (
           <Caption className="text-surface-grey mt-1.5 block">
-            Cross-chain communities need admin-managed recipients so the lists
-            can be kept in sync.
+            Cross-chain democratic community: the founding recipients are shared
+            on every chain, and proposals + votes are signed once and replayed
+            across chains — no per-chain re-signing.
+          </Caption>
+        )}
+        {isMultiChain && !democratic && (
+          <Caption className="text-surface-grey mt-1.5 block">
+            Admin-managed recipients — sync the list across chains with one
+            signature from the Admin page.
           </Caption>
         )}
         {democratic && (
@@ -671,7 +705,7 @@ function DeployForm() {
 
       {isMultiChain ? (
         <FamilyDeploySection
-          canStart={commonValid && isConnected}
+          canStart={commonValid && democraticValid && isConnected}
           needsWallet={!isConnected}
           family={family}
           cycleSeconds={cycleSeconds}

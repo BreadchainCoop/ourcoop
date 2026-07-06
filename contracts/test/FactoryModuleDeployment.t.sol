@@ -82,7 +82,7 @@ contract FactoryModuleDeploymentTest is Test {
     // ============ when creating an admin recipient registry ============
 
     function test_WhenCreatingAnAdminRecipientRegistry_ShouldDeployAndInitializeCorrectly() public {
-        bytes memory payload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory payload = abi.encodeWithSignature("initialize(address)", owner);
         address module = factory.create(adminRegistryBeacon, payload, keccak256("admin-registry-salt"));
 
         AdminRecipientRegistry registry = AdminRecipientRegistry(module);
@@ -109,7 +109,7 @@ contract FactoryModuleDeploymentTest is Test {
         initialRecipients[1] = address(0x222);
 
         bytes memory payload =
-            abi.encodeWithSelector(VotingRecipientRegistry.initialize.selector, owner, initialRecipients, 7 days);
+            abi.encodeWithSignature("initialize(address,address[],uint256)", owner, initialRecipients, uint256(7 days));
         address module = factory.create(votingRegistryBeacon, payload, keccak256("voting-registry-salt"));
 
         VotingRecipientRegistry registry = VotingRecipientRegistry(module);
@@ -123,7 +123,7 @@ contract FactoryModuleDeploymentTest is Test {
 
     function test_WhenCreatingAnEqualDistributionStrategy_ShouldDeployAndInitializeCorrectly() public {
         // Deploy a registry first for the strategy to use
-        bytes memory registryPayload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory registryPayload = abi.encodeWithSignature("initialize(address)", owner);
         address registry = factory.create(adminRegistryBeacon, registryPayload, keccak256("strat-registry-salt"));
 
         address mockYieldToken = address(0xABC);
@@ -147,7 +147,7 @@ contract FactoryModuleDeploymentTest is Test {
     // ============ when creating a voting distribution strategy ============
 
     function test_WhenCreatingAVotingDistributionStrategy_ShouldDeployAndInitializeCorrectly() public {
-        bytes memory registryPayload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory registryPayload = abi.encodeWithSignature("initialize(address)", owner);
         address registry = factory.create(adminRegistryBeacon, registryPayload, keccak256("vstrat-registry-salt"));
 
         address mockYieldToken = address(0xABC);
@@ -179,7 +179,7 @@ contract FactoryModuleDeploymentTest is Test {
         bytes memory cyclePayload = abi.encodeWithSelector(AbstractCycleModule.initialize.selector, 1000, owner);
         address cycleAddr = factory.create(cycleModuleBeacon, cyclePayload, keccak256("vm-cycle-salt"));
 
-        bytes memory registryPayload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory registryPayload = abi.encodeWithSignature("initialize(address)", owner);
         address registryAddr = factory.create(adminRegistryBeacon, registryPayload, keccak256("vm-registry-salt"));
 
         MockDistributionModule distModule = new MockDistributionModule(registryAddr, cycleAddr);
@@ -217,7 +217,7 @@ contract FactoryModuleDeploymentTest is Test {
         bytes memory cyclePayload = abi.encodeWithSelector(AbstractCycleModule.initialize.selector, 1000, owner);
         address cycleAddr = factory.create(cycleModuleBeacon, cyclePayload, keccak256("bdm-cycle-salt"));
 
-        bytes memory registryPayload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory registryPayload = abi.encodeWithSignature("initialize(address)", owner);
         address registryAddr = factory.create(adminRegistryBeacon, registryPayload, keccak256("bdm-registry-salt"));
 
         // Mock base token and voting module
@@ -251,7 +251,7 @@ contract FactoryModuleDeploymentTest is Test {
         bytes memory cyclePayload = abi.encodeWithSelector(AbstractCycleModule.initialize.selector, 1000, owner);
         address cycleAddr = factory.create(cycleModuleBeacon, cyclePayload, keccak256("msdm-cycle-salt"));
 
-        bytes memory registryPayload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory registryPayload = abi.encodeWithSignature("initialize(address)", owner);
         address registryAddr = factory.create(adminRegistryBeacon, registryPayload, keccak256("msdm-registry-salt"));
 
         address mockBaseToken = address(0xB0BA);
@@ -321,7 +321,7 @@ contract FactoryModuleDeploymentTest is Test {
         address cycleAddr = factory.create(cycleModuleBeacon, cyclePayload, keccak256("sys-cycle"));
 
         // 2. Deploy AdminRecipientRegistry
-        bytes memory registryPayload = abi.encodeWithSelector(AdminRecipientRegistry.initialize.selector, owner);
+        bytes memory registryPayload = abi.encodeWithSignature("initialize(address)", owner);
         address registryAddr = factory.create(adminRegistryBeacon, registryPayload, keccak256("sys-registry"));
 
         // All modules deployed and initialized via the factory

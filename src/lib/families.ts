@@ -1,5 +1,6 @@
 import {
   encodeAbiParameters,
+  encodePacked,
   keccak256,
   toHex,
   zeroAddress,
@@ -56,6 +57,87 @@ export function computeFamilyId(
         distributionKind,
       ],
     ),
+  );
+}
+
+/** The RegistryKind enum value for the democratic (Voting) registry. */
+const REGISTRY_KIND_VOTING = 1;
+
+/**
+ * Mirrors CrowdStakeDeployer.votingFamilyIdOf exactly. A democratic (Voting)
+ * cross-chain family MUST commit its founding cohort + expiry into the
+ * familyId: same creator/salt with different founders on two chains would
+ * otherwise mint one family with permanently drifted electorates and no heal
+ * path. Folds the base familyIdOf (with registryKind=Voting) with
+ * keccak256(abi.encodePacked(initialRecipients)) and proposalExpiry.
+ */
+export function computeVotingFamilyId(
+  creator: Address,
+  salt: Hex,
+  tokenName: string,
+  tokenSymbol: string,
+  maxVotingPoints: bigint,
+  distributionKind: number,
+  initialRecipients: readonly Address[],
+  proposalExpiry: bigint,
+): Hex {
+  const base = computeFamilyId(
+    creator,
+    salt,
+    tokenName,
+    tokenSymbol,
+    maxVotingPoints,
+    REGISTRY_KIND_VOTING,
+    distributionKind,
+  );
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }],
+      [
+        base,
+        keccak256(encodePacked(["address[]"], [[...initialRecipients]])),
+        proposalExpiry,
+      ],
+    ),
+  );
+}
+
+/**
+ * The familyId for a config, choosing the admin- or voting-kind derivation to
+ * match CrowdStakeDeployer.deploy: Voting-kind cross-chain families commit
+ * their founding cohort + expiry; admin-kind stays on the base familyIdOf.
+ */
+export function familyIdForConfig(cfg: {
+  creator: Address;
+  salt: Hex;
+  tokenName: string;
+  tokenSymbol: string;
+  maxVotingPoints: bigint;
+  registryKind: number;
+  distributionKind: number;
+  initialRecipients: readonly Address[];
+  proposalExpiry: bigint;
+}): Hex {
+  if (cfg.registryKind === REGISTRY_KIND_VOTING) {
+    return computeVotingFamilyId(
+      cfg.creator,
+      cfg.salt,
+      cfg.tokenName,
+      cfg.tokenSymbol,
+      cfg.maxVotingPoints,
+      cfg.distributionKind,
+      cfg.initialRecipients,
+      cfg.proposalExpiry,
+    );
+  }
+  return computeFamilyId(
+    cfg.creator,
+    cfg.salt,
+    cfg.tokenName,
+    cfg.tokenSymbol,
+    cfg.maxVotingPoints,
+    cfg.registryKind,
+    cfg.distributionKind,
   );
 }
 
@@ -201,6 +283,11 @@ export interface PendingFamilyParams {
   maxVotingPoints: string;
   registryKind: number;
   distributionKind: number;
+  /** Democratic families only: the founding recipient cohort (committed to
+   *  the familyId). Empty for admin families. */
+  initialRecipients: Address[];
+  /** Democratic families only: seconds a proposal stays open. "0" for admin. */
+  proposalExpiry: string;
   tokenImageURI: string;
   bannerImageURI: string;
 }

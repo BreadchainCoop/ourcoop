@@ -3,11 +3,14 @@
 import Link from "next/link";
 import type { Address } from "viem";
 import { Body, Button, Caption } from "@breadcoop/ui";
-import { ArrowRight, CheckCircle, Warning } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, Globe, Warning } from "@phosphor-icons/react";
 import { Card } from "@/components/dapp/ui";
 import { shortChainName } from "@/lib/chains";
 import { useActiveChainId } from "@/components/instance-provider";
 import { useFamily, type FamilyChainState } from "@/hooks/use-family";
+import { useRegistryKind } from "@/hooks/use-recipient-voting";
+import { useCrossChainRegistryUpdate } from "@/hooks/use-cross-chain-registry-update";
+import { MultiChainActionStatus } from "@/components/dapp/multi-chain-action-status";
 import {
   diffRecipients,
   useMirrorRecipients,
@@ -24,12 +27,19 @@ export function FamilyChainsCard() {
   const family = useFamily();
   const activeChainId = useActiveChainId();
   const mirror = useMirrorRecipients();
+  const { kind } = useRegistryKind();
 
   if (!family.isFamily) return null;
 
   const reference = family.perChain.find(
     (c) => c.chainId === activeChainId,
   )?.recipients;
+
+  // The sign-once "desired set" sync heals arbitrary drift on every sibling
+  // from ONE admin signature — admin registries only (a democratic registry
+  // converges through cross-chain proposals instead).
+  const showSync = kind === "admin";
+  const anyDrift = family.perChain.some((c) => c.drift);
 
   return (
     <Card>
@@ -41,7 +51,18 @@ export function FamilyChainsCard() {
         the memberships in sync below.
       </Body>
 
-      <ul className="mt-4 space-y-3">
+      {showSync && reference && (
+        <SyncEverywhere
+          family={family}
+          reference={reference}
+          drift={anyDrift}
+        />
+      )}
+
+      <Caption className="text-surface-grey-2 mt-6 mb-2 block">
+        {showSync ? "Per-chain mirror (fallback)" : "Per-chain recipients"}
+      </Caption>
+      <ul className="space-y-3">
         {family.perChain.map((c) => (
           <SiblingRow
             key={c.chainId}
@@ -49,8 +70,15 @@ export function FamilyChainsCard() {
             isActive={c.chainId === activeChainId}
             reference={reference}
             busy={mirror.busyChain === c.chainId}
-            onMirror={(registry, diff) =>
-              void mirror.mirror(c.chainId, registry, diff)
+            // The manual mirror drives the classic queue functions, which
+            // revert CrossChainOnly on democratic family registries — offer
+            // it for admin registries only. Democratic families converge
+            // through cross-chain proposals instead.
+            onMirror={
+              showSync
+                ? (registry, diff) =>
+                    void mirror.mirror(c.chainId, registry, diff)
+                : undefined
             }
           />
         ))}
@@ -84,6 +112,98 @@ export function FamilyChainsCard() {
   );
 }
 
+/**
+ * "Sync recipients everywhere" — the sign-once path above the per-chain Mirror
+ * fallback. The admin signs ONE chain-agnostic desired-set signature (the full
+ * recipient list from this chain, the reference); every sibling computes its own
+ * delta and applies it, healing arbitrary drift. The relay delivers it (or the
+ * admin self-submits per chain when no relay is reachable), and settlement is
+ * confirmed on-chain via lastRegistryUpdateNonce.
+ */
+function SyncEverywhere({
+  family,
+  reference,
+  drift,
+}: {
+  family: ReturnType<typeof useFamily>;
+  reference: readonly Address[];
+  drift: boolean;
+}) {
+  const sync = useCrossChainRegistryUpdate(family);
+
+  return (
+    <div className="border-paper-2 bg-paper-0 mt-4 rounded-xl border p-4">
+      <Caption className="text-text-standard flex items-center gap-1.5 font-semibold">
+        <Globe size={16} weight="fill" className="text-core-orange" />
+        Sync recipients everywhere
+      </Caption>
+      <Body className="text-surface-grey-2 mt-1 text-sm">
+        Sign once to push this chain&apos;s {reference.length} recipient
+        {reference.length === 1 ? "" : "s"} to every sibling. Each chain applies
+        its own delta, so one signature heals any drift — anyone can deliver it.
+      </Body>
+      <Button
+        app="fund"
+        variant="primary"
+        className="mt-3"
+        isLoading={sync.isBusy}
+        onClick={() => sync.sign(reference)}
+        {...(reference.length === 0 ? { disabled: true } : {})}
+      >
+        {drift ? "Sync recipients everywhere" : "Re-sync recipients"}
+      </Button>
+      {sync.error && (
+        <Caption className="text-system-red mt-2 block">{sync.error}</Caption>
+      )}
+      <MultiChainActionStatus
+        rows={sync.rows}
+        phase={sync.phase}
+        relayDown={sync.relayDown}
+        submitting={sync.submitting}
+        payload={sync.payload}
+        onSubmitOnChain={sync.submitOnChain}
+        onRetryRelay={sync.retryRelay}
+        copy={{
+          stateLabel: (row) => {
+            switch (row.state) {
+              case "confirmed":
+                return "Synced";
+              case "superseded":
+                return "Superseded by a newer sync";
+              case "recipient_mismatch":
+                return "Recipient list out of sync";
+              case "unreachable":
+                return "Couldn't reach chain";
+              case "awaiting_submission":
+                return "Relay unavailable — submit from your wallet";
+              case "failed":
+                return row.error ?? "Delivery failed";
+              case "submitted":
+                return "Submitted — confirming…";
+              case "relaying":
+                return "Relaying…";
+              case "signing":
+                return "Waiting for your signature…";
+              default:
+                return "Waiting…";
+            }
+          },
+          aggregate: ({ counted, total, phase, relayDown }) =>
+            phase === "signing"
+              ? "Confirm in your wallet…"
+              : phase === "done" || relayDown
+                ? `Synced on ${counted} of ${total} chain${
+                    total === 1 ? "" : "s"
+                  }`
+                : `Syncing ${total} chain${total === 1 ? "" : "s"}…`,
+          copyLabel: "Copy signed sync",
+          copyHint: "Anyone can deliver this — paste it to your community.",
+        }}
+      />
+    </div>
+  );
+}
+
 function SiblingRow({
   chain,
   isActive,
@@ -95,7 +215,7 @@ function SiblingRow({
   isActive: boolean;
   reference: readonly Address[] | undefined;
   busy: boolean;
-  onMirror: (
+  onMirror?: (
     registry: Address,
     diff: ReturnType<typeof diffRecipients>,
   ) => void;
@@ -139,7 +259,7 @@ function SiblingRow({
         )}
       </div>
 
-      {!isActive && chain.status === "found" && diff && !inSync && (
+      {!isActive && chain.status === "found" && diff && !inSync && onMirror && (
         <Button
           app="fund"
           variant="secondary"

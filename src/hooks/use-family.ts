@@ -26,6 +26,8 @@ export interface FamilyChainState {
   hasVoted?: boolean;
   cycleNumber?: bigint;
   recipients?: readonly Address[];
+  /** Admin registries: highest cross-chain registry-update nonce landed here. */
+  lastRegistryUpdateNonce?: bigint;
   /** Recipient MEMBERSHIP differs from the active chain (order is irrelevant). */
   drift: boolean;
 }
@@ -88,6 +90,15 @@ async function loadChainState(
             })
           : Promise.resolve(undefined),
       ]);
+    // Admin registries expose lastRegistryUpdateNonce; on voting registries the
+    // call reverts — a separate tolerant read so it never fails the whole chain.
+    const lastRegistryUpdateNonce = await client
+      .readContract({
+        address: a.recipientRegistry,
+        abi: recipientRegistryAbi,
+        functionName: "lastRegistryUpdateNonce",
+      })
+      .catch(() => undefined);
     return {
       ...base,
       cycleNumber,
@@ -95,6 +106,7 @@ async function loadChainState(
       votingPower,
       lastNonce,
       hasVoted,
+      lastRegistryUpdateNonce,
     };
   } catch {
     return { ...base, status: "unreachable" };

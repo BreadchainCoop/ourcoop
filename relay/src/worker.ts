@@ -1,13 +1,20 @@
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
 import {
   RevertError,
-  type CastVoteArgs,
+  resolveTarget,
   type ChainAccess,
+  type DeliveryArgs,
 } from "./chain-access.js";
 import type { GasBudget } from "./gas-budget.js";
 import { errorMessage, log, warn } from "./log.js";
 import type { NonceManager } from "./nonce-manager.js";
-import type { JobRow, JobState, Store, VoteRow } from "./store.js";
+import type {
+  ActionRow,
+  FamilyInstance,
+  JobRow,
+  JobState,
+  Store,
+} from "./store.js";
 
 export interface WorkerTimings {
   pollIntervalMs: number;
@@ -51,9 +58,11 @@ export interface ChainWorkerDeps {
   access: ChainAccess;
   nonces: NonceManager;
   gasBudget: GasBudget;
-  resolveVotingModule: (
-    familyId: VoteRow["familyId"],
-  ) => Promise<Address | null>;
+  /** Resolve the full family instance on this chain, or null when absent. The
+   *  worker derives the per-kind target (votingModule vs registry) from it. */
+  resolveInstance: (
+    familyId: ActionRow["familyId"],
+  ) => Promise<FamilyInstance | null>;
   timings?: Partial<WorkerTimings>;
   now?: () => number;
 }
@@ -62,6 +71,11 @@ export interface ChainWorkerDeps {
  * Per-chain worker (spec B.4) — the ONLY sender for its chain. One serialized
  * loop: confirm/reap submitted txs, then process due jobs in order. All state
  * transitions land in the durable store before/after each side effect.
+ *
+ * Delivery is kind-dispatched: each action (vote / registry-update / proposal /
+ * proposal-vote) has its own settlement read + skip-checks + revert
+ * classification, but shares one simulate → gas-budget → send → confirm → reap
+ * pipeline.
  */
 export class ChainWorker {
   readonly chainId: number;
@@ -70,7 +84,7 @@ export class ChainWorker {
   private readonly access: ChainAccess;
   private readonly nonces: NonceManager;
   private readonly gasBudget: GasBudget;
-  private readonly resolveVotingModule: ChainWorkerDeps["resolveVotingModule"];
+  private readonly resolveInstance: ChainWorkerDeps["resolveInstance"];
   private readonly timings: WorkerTimings;
   private readonly now: () => number;
 
@@ -86,7 +100,7 @@ export class ChainWorker {
     this.access = deps.access;
     this.nonces = deps.nonces;
     this.gasBudget = deps.gasBudget;
-    this.resolveVotingModule = deps.resolveVotingModule;
+    this.resolveInstance = deps.resolveInstance;
     this.timings = { ...DEFAULT_TIMINGS, ...deps.timings };
     this.now = deps.now ?? Date.now;
   }
@@ -151,130 +165,222 @@ export class ChainWorker {
   // ── delivery ─────────────────────────────────────────────────────────────
 
   private async processJob(job: JobRow): Promise<void> {
-    const vote = this.store.getVoteById(job.voteId);
-    if (!vote) {
-      this.transition(job, "failed", { lastError: "vote row missing" });
+    const action = this.store.getActionById(job.actionId);
+    if (!action) {
+      this.transition(job, "failed", { lastError: "action row missing" });
       return;
     }
     try {
-      // Skip-checks in spec order. The chain is the authority; these only
-      // save gas and classify terminal outcomes.
+      // Expiry check in spec order (deadline for vote/registry-update/
+      // proposal-vote, absolute expiresAt for a proposal).
       const nowSec = BigInt(Math.floor(this.now() / 1000));
-      if (BigInt(vote.deadline) < nowSec) {
+      if (this.isExpired(action, nowSec)) {
         this.transition(job, "expired", { lastError: null });
         return;
       }
 
-      const votingModule = await this.resolveVotingModule(vote.familyId);
-      if (!votingModule) {
+      const instance = await this.resolveInstance(action.familyId);
+      if (!instance) {
         this.defer(job, "family instance not resolvable on this chain");
         return;
       }
+      const target = resolveTarget(action.kind, instance);
 
-      const last = await this.access.lastCrossChainNonce(
-        votingModule,
-        vote.voter,
-      );
-      if (last >= BigInt(vote.nonce)) {
-        // Success-class: this or a newer ballot already landed here.
-        this.transition(job, "superseded", { lastError: null });
-        return;
-      }
+      // Per-kind skip-checks: the chain is the authority; these only save gas
+      // and classify terminal / success-class outcomes early.
+      const decided = await this.skipChecks(job, action, instance, target);
+      if (decided) return;
 
-      const power = await this.access.getVotingPower(votingModule, vote.voter);
-      if (power === 0n) {
-        this.transition(job, "skipped_no_power", {
-          notBefore: this.now() + this.timings.noPowerRetryMs,
-          lastError: "no voting power on this chain (will re-check)",
-        });
-        return;
-      }
-
-      const args: CastVoteArgs = {
-        voter: vote.voter,
-        points: vote.points.map(BigInt),
-        recipients: vote.recipients,
-        nonce: BigInt(vote.nonce),
-        deadline: BigInt(vote.deadline),
-        signature: vote.signature,
-      };
-
-      let gas: bigint;
-      try {
-        gas = await this.access.simulateCastVote(votingModule, args);
-      } catch (e) {
-        if (e instanceof RevertError) {
-          this.applyRevert(job, e);
-          return;
-        }
-        throw e;
-      }
-
-      const fees = await this.access.estimateFees();
-      const gasLimit = (gas * 120n) / 100n;
-      const cost = gasLimit * fees.maxFeePerGas;
-      if (!this.gasBudget.tryReserve(this.chainId, cost, this.now())) {
-        this.store.updateJob(
-          job.voteId,
-          job.chainId,
-          {
-            lastError: "deferred: daily gas budget exhausted",
-            notBefore: this.now() + 60 * 60_000,
-          },
-          this.now(),
-        );
-        warn(this.name, `gas budget exhausted — deferring vote ${job.voteId}`);
-        return;
-      }
-
-      let acctNonce: number;
-      let txHash;
-      try {
-        acctNonce = await this.nonces.allocate();
-        txHash = await this.access.sendCastVote(votingModule, args, {
-          nonce: acctNonce,
-          gas: gasLimit,
-          ...fees,
-        });
-      } catch (e) {
-        // The send never landed — no gas was burned, so give the reservation
-        // back. Otherwise repeated failures inflate phantom spend until the
-        // breaker defers every vote for the rest of the day.
-        this.gasBudget.release(this.chainId, cost, this.now());
-        // The account nonce may now be gapped — refetch before the next send.
-        this.nonces.reset();
-        const revert = e instanceof RevertError ? e : null;
-        if (revert) {
-          this.applyRevert(job, revert);
-          return;
-        }
-        throw e;
-      }
-
-      const head = await this.access.getBlockNumber().catch(() => null);
-      this.transition(job, "submitted", {
-        txHash,
-        acctNonce,
-        maxFeePerGas: fees.maxFeePerGas.toString(),
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
-        submittedBlock: head === null ? null : head.toString(),
-        lastError: null,
-      });
-      log(this.name, `submitted vote ${job.voteId}`, { txHash, acctNonce });
+      const delivery = buildDelivery(action);
+      await this.deliver(job, target, delivery);
     } catch (e) {
       this.defer(job, errorMessage(e));
       throw e;
     }
   }
 
-  /** Map a decoded revert to a job state (spec B.4). */
-  private applyRevert(job: JobRow, e: RevertError): void {
-    switch (e.errorName) {
-      case "StaleNonce":
-        // Success-class: a newer ballot landed first.
-        this.transition(job, "superseded", { lastError: null });
+  /** True when the signed action is past its time bound on this chain. */
+  private isExpired(action: ActionRow, nowSec: bigint): boolean {
+    if (action.deadline !== null && BigInt(action.deadline) < nowSec)
+      return true;
+    if (action.expiresAt !== null && BigInt(action.expiresAt) < nowSec)
+      return true;
+    return false;
+  }
+
+  /**
+   * Per-kind pre-flight. Returns true when it settled the job (no send needed):
+   * superseded / skipped_no_power / recipient_mismatch / confirmed / deferred.
+   */
+  private async skipChecks(
+    job: JobRow,
+    action: ActionRow,
+    instance: FamilyInstance,
+    target: Address,
+  ): Promise<boolean> {
+    switch (action.kind) {
+      case "vote": {
+        const last = await this.access.lastCrossChainNonce(
+          target,
+          action.signer,
+        );
+        if (last >= BigInt(action.nonce!)) {
+          // Success-class: this or a newer ballot already landed here.
+          this.transition(job, "superseded", { lastError: null });
+          return true;
+        }
+        const power = await this.access.getVotingPower(target, action.signer);
+        if (power === 0n) {
+          this.transition(job, "skipped_no_power", {
+            notBefore: this.now() + this.timings.noPowerRetryMs,
+            lastError: "no voting power on this chain (will re-check)",
+          });
+          return true;
+        }
+        return false;
+      }
+      case "registry-update": {
+        // On-chain nonce >= signed → superseded. Otherwise DELIVER even when the
+        // set already matches: applying burns the nonce and kills older floating
+        // signatures. (No "already-equal" skip.)
+        const last = await this.access.lastRegistryUpdateNonce(target);
+        if (last >= BigInt(action.nonce!)) {
+          this.transition(job, "superseded", { lastError: null });
+          return true;
+        }
+        return false;
+      }
+      case "proposal": {
+        // Content-addressed: if the key already exists here, creation landed
+        // (by us, a sibling relay, or an on-chain submission) — confirmed.
+        const existing = await this.access.getCrossChainProposal(
+          target,
+          action.proposalKey!,
+        );
+        if (existing) {
+          this.transition(job, "confirmed", { lastError: null });
+          return true;
+        }
+        return false;
+      }
+      case "proposal-vote": {
+        const proposal = await this.access.getCrossChainProposal(
+          target,
+          action.proposalKey!,
+        );
+        if (!proposal) {
+          // The creation job may not have landed yet — DEFER with backoff,
+          // never terminal. (A missing proposal is not a permanent failure.)
+          this.defer(job, "proposal not yet on-chain (awaiting creation)");
+          return true;
+        }
+        if (proposal.executed) {
+          // Threshold reached (our vote or others') — success-class.
+          this.transition(job, "superseded", { lastError: null });
+          return true;
+        }
+        if (
+          await this.access.hasVotedCrossChain(
+            target,
+            action.proposalKey!,
+            action.signer,
+          )
+        ) {
+          this.transition(job, "superseded", { lastError: null });
+          return true;
+        }
+        return false;
+      }
+    }
+  }
+
+  /** Shared simulate → gas-budget → send → submitted pipeline. */
+  private async deliver(
+    job: JobRow,
+    target: Address,
+    delivery: DeliveryArgs,
+  ): Promise<void> {
+    let gas: bigint;
+    try {
+      gas = await this.access.simulate(target, delivery);
+    } catch (e) {
+      if (e instanceof RevertError) {
+        this.applyRevert(job, delivery.kind, e);
         return;
+      }
+      throw e;
+    }
+
+    const fees = await this.access.estimateFees();
+    const gasLimit = (gas * 120n) / 100n;
+    const cost = gasLimit * fees.maxFeePerGas;
+    if (!this.gasBudget.tryReserve(this.chainId, cost, this.now())) {
+      this.store.updateJob(
+        job.actionId,
+        job.chainId,
+        {
+          lastError: "deferred: daily gas budget exhausted",
+          notBefore: this.now() + 60 * 60_000,
+        },
+        this.now(),
+      );
+      warn(
+        this.name,
+        `gas budget exhausted — deferring action ${job.actionId}`,
+      );
+      return;
+    }
+
+    let acctNonce: number;
+    let txHash;
+    try {
+      acctNonce = await this.nonces.allocate();
+      txHash = await this.access.send(target, delivery, {
+        nonce: acctNonce,
+        gas: gasLimit,
+        ...fees,
+      });
+    } catch (e) {
+      // The send never landed — no gas was burned, so give the reservation
+      // back. Otherwise repeated failures inflate phantom spend until the
+      // breaker defers everything for the rest of the day.
+      this.gasBudget.release(this.chainId, cost, this.now());
+      // The account nonce may now be gapped — refetch before the next send.
+      this.nonces.reset();
+      const revert = e instanceof RevertError ? e : null;
+      if (revert) {
+        this.applyRevert(job, delivery.kind, revert);
+        return;
+      }
+      throw e;
+    }
+
+    const head = await this.access.getBlockNumber().catch(() => null);
+    this.transition(job, "submitted", {
+      txHash,
+      acctNonce,
+      maxFeePerGas: fees.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+      submittedBlock: head === null ? null : head.toString(),
+      lastError: null,
+    });
+    log(this.name, `submitted ${delivery.kind} ${job.actionId}`, {
+      txHash,
+      acctNonce,
+    });
+  }
+
+  /** Map a decoded revert to a job state (spec B.4), per delivery kind. */
+  private applyRevert(
+    job: JobRow,
+    kind: ActionRow["kind"],
+    e: RevertError,
+  ): void {
+    // Shared success/expiry-class reverts across kinds.
+    switch (e.errorName) {
       case "SignatureExpired":
+      case "ProposalExpired":
+      case "ExpiryTooFar":
         this.transition(job, "expired", { lastError: null });
         return;
       case "RecipientSetMismatch":
@@ -283,15 +389,58 @@ export class ChainWorker {
           lastError: "recipient list out of sync on this chain (will re-check)",
         });
         return;
-      case "ZeroVotingPower":
-        this.transition(job, "skipped_no_power", {
-          notBefore: this.now() + this.timings.noPowerRetryMs,
-          lastError: "no voting power on this chain (will re-check)",
-        });
-        return;
-      default:
-        this.transition(job, "failed", { lastError: e.errorName });
     }
+
+    switch (kind) {
+      case "vote": {
+        if (e.errorName === "StaleNonce") {
+          // A newer ballot landed first — success-class.
+          this.transition(job, "superseded", { lastError: null });
+          return;
+        }
+        if (e.errorName === "ZeroVotingPower") {
+          this.transition(job, "skipped_no_power", {
+            notBefore: this.now() + this.timings.noPowerRetryMs,
+            lastError: "no voting power on this chain (will re-check)",
+          });
+          return;
+        }
+        break;
+      }
+      case "registry-update": {
+        if (e.errorName === "StaleNonce") {
+          // A newer (or equal) desired-set update already burned this nonce.
+          this.transition(job, "superseded", { lastError: null });
+          return;
+        }
+        break;
+      }
+      case "proposal": {
+        // The key already exists here (created by us, a sibling, or on-chain).
+        if (e.errorName === "ProposalAlreadyExists") {
+          this.transition(job, "superseded", { lastError: null });
+          return;
+        }
+        break;
+      }
+      case "proposal-vote": {
+        // Already counted here, or the proposal already executed — success-class.
+        if (
+          e.errorName === "AlreadyVoted" ||
+          e.errorName === "ProposalAlreadyExecuted"
+        ) {
+          this.transition(job, "superseded", { lastError: null });
+          return;
+        }
+        // The creation tx may still be in flight — DEFER, never terminal.
+        if (e.errorName === "ProposalNotFound") {
+          this.defer(job, "proposal not yet on-chain (awaiting creation)");
+          return;
+        }
+        break;
+      }
+    }
+    this.transition(job, "failed", { lastError: e.errorName });
   }
 
   /** Transient failure: keep the state, back off exponentially. Never drops. */
@@ -302,7 +451,7 @@ export class ChainWorker {
       this.timings.backoffMaxMs,
     );
     this.store.updateJob(
-      job.voteId,
+      job.actionId,
       job.chainId,
       {
         attempts,
@@ -319,12 +468,12 @@ export class ChainWorker {
     patch: Parameters<Store["updateJob"]>[2] = {},
   ): void {
     this.store.updateJob(
-      job.voteId,
+      job.actionId,
       job.chainId,
       { state, ...patch },
       this.now(),
     );
-    log(this.name, `vote ${job.voteId}: ${job.state} -> ${state}`);
+    log(this.name, `action ${job.actionId}: ${job.state} -> ${state}`);
   }
 
   // ── confirmation + stuck-tx reaper ───────────────────────────────────────
@@ -354,25 +503,62 @@ export class ChainWorker {
     }
   }
 
-  /** On-chain revert without a decoded error: StaleNonce-shaped outcomes are
-   *  success-class, everything else is failed. */
+  /**
+   * On-chain revert without a decoded error: re-derive success-class outcomes
+   * from settlement reads per kind (a racing delivery may have won). Everything
+   * else is failed.
+   */
   private async classifyRevertedReceipt(job: JobRow): Promise<void> {
-    const vote = this.store.getVoteById(job.voteId);
-    if (vote) {
-      const votingModule = await this.resolveVotingModule(vote.familyId).catch(
-        () => null,
-      );
-      if (votingModule) {
-        const last = await this.access
-          .lastCrossChainNonce(votingModule, vote.voter)
-          .catch(() => null);
-        if (last !== null && last >= BigInt(vote.nonce)) {
-          this.transition(job, "superseded", { lastError: null });
-          return;
-        }
+    const action = this.store.getActionById(job.actionId);
+    if (action) {
+      const settled = await this.isSettled(action).catch(() => false);
+      if (settled) {
+        this.transition(job, "superseded", { lastError: null });
+        return;
       }
     }
     this.transition(job, "failed", { lastError: "transaction reverted" });
+  }
+
+  /** Per-kind "did the intended effect already land here?" settlement read. */
+  private async isSettled(action: ActionRow): Promise<boolean> {
+    const instance = await this.resolveInstance(action.familyId).catch(
+      () => null,
+    );
+    if (!instance) return false;
+    const target = resolveTarget(action.kind, instance);
+    switch (action.kind) {
+      case "vote": {
+        const last = await this.access.lastCrossChainNonce(
+          target,
+          action.signer,
+        );
+        return last >= BigInt(action.nonce!);
+      }
+      case "registry-update": {
+        const last = await this.access.lastRegistryUpdateNonce(target);
+        return last >= BigInt(action.nonce!);
+      }
+      case "proposal": {
+        const existing = await this.access.getCrossChainProposal(
+          target,
+          action.proposalKey!,
+        );
+        return existing !== undefined;
+      }
+      case "proposal-vote": {
+        const proposal = await this.access.getCrossChainProposal(
+          target,
+          action.proposalKey!,
+        );
+        if (proposal?.executed) return true;
+        return this.access.hasVotedCrossChain(
+          target,
+          action.proposalKey!,
+          action.signer,
+        );
+      }
+    }
   }
 
   /** Fee-bump rebroadcast on the SAME account nonce when unmined too long. */
@@ -384,10 +570,12 @@ export class ChainWorker {
     // rebroadcast is retried on this cadence, not every ~3s poll pass.
     if (this.now() - job.updatedAt < this.timings.rebroadcastMinIntervalMs)
       return;
-    const vote = this.store.getVoteById(job.voteId);
-    if (!vote) return;
-    const votingModule = await this.resolveVotingModule(vote.familyId);
-    if (!votingModule) return;
+    const action = this.store.getActionById(job.actionId);
+    if (!action) return;
+    const instance = await this.resolveInstance(action.familyId);
+    if (!instance) return;
+    const target = resolveTarget(action.kind, instance);
+    const delivery = buildDelivery(action);
 
     const fresh = await this.access.estimateFees();
     // Bump +25% over the previous cap, floored at a fresh estimate and CEILED
@@ -408,25 +596,21 @@ export class ChainWorker {
         fresh.maxPriorityFeePerGas,
       ),
     };
-    const args: CastVoteArgs = {
-      voter: vote.voter,
-      points: vote.points.map(BigInt),
-      recipients: vote.recipients,
-      nonce: BigInt(vote.nonce),
-      deadline: BigInt(vote.deadline),
-      signature: vote.signature,
-    };
 
     let gas: bigint;
     try {
-      gas = await this.access.simulateCastVote(votingModule, args);
+      gas = await this.access.simulate(target, delivery);
     } catch (e) {
       // Record the attempt (bump updated_at) so the rate limit applies, then
-      // let the next confirm pass settle via receipt / lastCrossChainNonce.
+      // let the next confirm pass settle via receipt / settlement read.
       this.markRebroadcastAttempt(job, `rebroadcast simulate failed`);
-      warn(this.name, `rebroadcast simulate failed for vote ${job.voteId}`, {
-        error: errorMessage(e),
-      });
+      warn(
+        this.name,
+        `rebroadcast simulate failed for action ${job.actionId}`,
+        {
+          error: errorMessage(e),
+        },
+      );
       return;
     }
     const gasLimit = (gas * 120n) / 100n;
@@ -435,17 +619,20 @@ export class ChainWorker {
     // the breaker is open, defer (record the attempt so we back off).
     if (!this.gasBudget.tryReserve(this.chainId, cost, this.now())) {
       this.markRebroadcastAttempt(job, "rebroadcast deferred: gas budget");
-      warn(this.name, `rebroadcast deferred (budget) for vote ${job.voteId}`);
+      warn(
+        this.name,
+        `rebroadcast deferred (budget) for action ${job.actionId}`,
+      );
       return;
     }
     try {
-      const txHash = await this.access.sendCastVote(votingModule, args, {
+      const txHash = await this.access.send(target, delivery, {
         nonce: job.acctNonce,
         gas: gasLimit,
         ...fees,
       });
       this.store.updateJob(
-        job.voteId,
+        job.actionId,
         job.chainId,
         {
           txHash,
@@ -456,14 +643,14 @@ export class ChainWorker {
         },
         this.now(),
       );
-      log(this.name, `rebroadcast vote ${job.voteId}`, { txHash });
+      log(this.name, `rebroadcast action ${job.actionId}`, { txHash });
     } catch (e) {
       // The rebroadcast never landed — refund the reservation. "nonce too low"
       // usually means the original tx just mined; the next confirm pass settles
-      // it via the receipt / lastCrossChainNonce.
+      // it via the receipt / settlement read.
       this.gasBudget.release(this.chainId, cost, this.now());
       this.markRebroadcastAttempt(job, "rebroadcast send failed");
-      warn(this.name, `rebroadcast failed for vote ${job.voteId}`, {
+      warn(this.name, `rebroadcast failed for action ${job.actionId}`, {
         error: errorMessage(e),
       });
     }
@@ -483,10 +670,62 @@ export class ChainWorker {
    *  the rate limit engages even when nothing was actually sent. */
   private markRebroadcastAttempt(job: JobRow, reason: string): void {
     this.store.updateJob(
-      job.voteId,
+      job.actionId,
       job.chainId,
       { lastError: reason },
       this.now(),
     );
+  }
+}
+
+/** Build the kind-tagged delivery args from a stored action row. */
+export function buildDelivery(action: ActionRow): DeliveryArgs {
+  switch (action.kind) {
+    case "vote":
+      return {
+        kind: "vote",
+        args: {
+          voter: action.signer,
+          points: action.points!.map(BigInt),
+          recipients: action.recipients!,
+          nonce: BigInt(action.nonce!),
+          deadline: BigInt(action.deadline!),
+          signature: action.signature,
+        },
+      };
+    case "registry-update":
+      return {
+        kind: "registry-update",
+        args: {
+          admin: action.signer,
+          recipients: action.recipients!,
+          nonce: BigInt(action.nonce!),
+          deadline: BigInt(action.deadline!),
+          signature: action.signature,
+        },
+      };
+    case "proposal":
+      return {
+        kind: "proposal",
+        args: {
+          proposer: action.signer,
+          candidate: action.candidate!,
+          isAddition: action.isAddition!,
+          electorate: action.electorate!,
+          expiresAt: BigInt(action.expiresAt!),
+          nonce: BigInt(action.nonce!),
+          signature: action.signature,
+        },
+      };
+    case "proposal-vote":
+      return {
+        kind: "proposal-vote",
+        args: {
+          voter: action.signer,
+          proposalKey: action.proposalKey! as Hex,
+          deadline: BigInt(action.deadline!),
+          signature: action.signature,
+        },
+      };
   }
 }

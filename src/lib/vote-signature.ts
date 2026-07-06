@@ -1,4 +1,10 @@
-import type { Address, Hex } from "viem";
+import {
+  encodeAbiParameters,
+  encodePacked,
+  keccak256,
+  type Address,
+  type Hex,
+} from "viem";
 
 /**
  * The cross-chain vote's EIP-712 shape — pinned to the contracts' scheme
@@ -6,6 +12,12 @@ import type { Address, Hex } from "viem";
  * The domain is deliberately chainless: no chainId, no verifyingContract —
  * scoping comes from the familyId salt, which is what lets ONE signature land
  * on every sibling chain.
+ *
+ * The same chainless domain carries the three registry-governance kinds too
+ * (registry-update, proposal, proposal-vote): distinct EIP-712 primary types
+ * are the firewall between action kinds. Every TYPES const + payload builder
+ * below mirrors relay/src/typed-data.ts and the contracts byte-for-byte —
+ * pinned by the tracked relay/test/crosschain-vector.json parity assertion.
  */
 
 /** Domain per family: EIP712Domain(string name,string version,bytes32 salt). */
@@ -72,6 +84,222 @@ export function buildVotePayload(
     points: points.map((p) => p.toString()),
     recipients: [...recipients],
     nonce: nonce.toString(),
+    deadline: deadline.toString(),
+    signature,
+  };
+}
+
+/* ─────────────────────────── registry-update ─────────────────────────── */
+
+/**
+ * Admin "desired set" registry update. The signed array is the FULL DESIRED
+ * SET (strictly ascending, canonical) — each chain computes its own delta, so
+ * one signature heals arbitrary drift. Mirrors AdminRecipientRegistry
+ * .CROSS_CHAIN_REGISTRY_UPDATE_TYPEHASH.
+ */
+export const CROSS_CHAIN_REGISTRY_UPDATE_TYPES = {
+  CrossChainRegistryUpdate: [
+    { name: "admin", type: "address" },
+    { name: "recipients", type: "address[]" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+/** Sort recipients strictly ascending by uint160(address) — the signed canon. */
+export function sortRecipientsAscending(
+  recipients: readonly Address[],
+): Address[] {
+  return [...recipients].sort((a, b) =>
+    BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0,
+  );
+}
+
+/** The relay POST body / copyable escape hatch for a registry update. */
+export interface SignedRegistryUpdatePayload {
+  kind: "registry-update";
+  familyId: Hex;
+  admin: Address;
+  recipients: Address[];
+  nonce: string;
+  deadline: string;
+  signature: Hex;
+}
+
+/**
+ * Build the registry-update payload. `recipients` is sorted ascending here so
+ * the caller can pass any order — the ascending set is what was signed.
+ */
+export function buildRegistryUpdatePayload(
+  familyId: Hex,
+  admin: Address,
+  recipients: readonly Address[],
+  nonce: bigint,
+  deadline: bigint,
+  signature: Hex,
+): SignedRegistryUpdatePayload {
+  return {
+    kind: "registry-update",
+    familyId,
+    admin,
+    recipients: sortRecipientsAscending(recipients),
+    nonce: nonce.toString(),
+    deadline: deadline.toString(),
+    signature,
+  };
+}
+
+/* ───────────────────────────── proposal ──────────────────────────────── */
+
+/**
+ * Democratic cross-chain proposal. The signed electorate replaces the local
+ * snapshot; each chain validates set-equality vs its recipients. Mirrors
+ * VotingRecipientRegistry.CROSS_CHAIN_PROPOSAL_TYPEHASH.
+ */
+export const CROSS_CHAIN_PROPOSAL_TYPES = {
+  CrossChainProposal: [
+    { name: "proposer", type: "address" },
+    { name: "candidate", type: "address" },
+    { name: "isAddition", type: "bool" },
+    { name: "electorate", type: "address[]" },
+    { name: "expiresAt", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+  ],
+} as const;
+
+/** The typehash matching the contract's CROSS_CHAIN_PROPOSAL_TYPEHASH. */
+export const CROSS_CHAIN_PROPOSAL_TYPEHASH = keccak256(
+  encodePacked(
+    ["string"],
+    [
+      "CrossChainProposal(address proposer,address candidate,bool isAddition,address[] electorate,uint256 expiresAt,uint256 nonce)",
+    ],
+  ),
+);
+
+export interface CrossChainProposalMessage {
+  proposer: Address;
+  candidate: Address;
+  isAddition: boolean;
+  electorate: readonly Address[];
+  expiresAt: bigint;
+  nonce: bigint;
+}
+
+/**
+ * proposalKey = the EIP-712 struct hash itself (content-addressed,
+ * chain-agnostic, so the same proposal exists under the same key everywhere).
+ * Hand-rolled to reproduce the contract's
+ *   keccak256(abi.encode(typehash, proposer, candidate, isAddition,
+ *     keccak256(abi.encodePacked(electorate)), expiresAt, nonce))
+ * EXACTLY — and to stay byte-identical to relay computeProposalKey. Pinned by
+ * relay/test/crosschain-vector.json (proposal.proposalKey) — must reproduce it.
+ */
+export function computeProposalKey(message: CrossChainProposalMessage): Hex {
+  const electorateHash = keccak256(
+    encodePacked(["address[]"], [[...message.electorate]]),
+  );
+  return keccak256(
+    encodeAbiParameters(
+      [
+        { type: "bytes32" },
+        { type: "address" },
+        { type: "address" },
+        { type: "bool" },
+        { type: "bytes32" },
+        { type: "uint256" },
+        { type: "uint256" },
+      ],
+      [
+        CROSS_CHAIN_PROPOSAL_TYPEHASH,
+        message.proposer,
+        message.candidate,
+        message.isAddition,
+        electorateHash,
+        message.expiresAt,
+        message.nonce,
+      ],
+    ),
+  );
+}
+
+/** The relay POST body / copyable escape hatch for a proposal. */
+export interface SignedProposalPayload {
+  kind: "proposal";
+  familyId: Hex;
+  proposer: Address;
+  candidate: Address;
+  isAddition: boolean;
+  electorate: Address[];
+  expiresAt: string;
+  nonce: string;
+  signature: Hex;
+}
+
+export function buildProposalPayload(
+  familyId: Hex,
+  message: CrossChainProposalMessage,
+  signature: Hex,
+): SignedProposalPayload {
+  return {
+    kind: "proposal",
+    familyId,
+    proposer: message.proposer,
+    candidate: message.candidate,
+    isAddition: message.isAddition,
+    electorate: [...message.electorate],
+    expiresAt: message.expiresAt.toString(),
+    nonce: message.nonce.toString(),
+    signature,
+  };
+}
+
+/**
+ * A proposal nonce that only distinguishes REPEAT proposals of identical
+ * content (concurrent distinct proposals must NOT supersede each other — the
+ * dedup is the proposalKey, not the nonce). Wall-clock ms is unique enough.
+ */
+export function proposalNonce(nowMs: number = Date.now()): bigint {
+  return BigInt(nowMs);
+}
+
+/* ─────────────────────────── proposal-vote ───────────────────────────── */
+
+/**
+ * A vote on a democratic cross-chain proposal — NO nonce (per-chain replay is
+ * blocked by hasVoted, cross-proposal by proposalKey, cross-family by the
+ * domain salt). Mirrors VotingRecipientRegistry.CROSS_CHAIN_PROPOSAL_VOTE_TYPEHASH.
+ */
+export const CROSS_CHAIN_PROPOSAL_VOTE_TYPES = {
+  CrossChainProposalVote: [
+    { name: "voter", type: "address" },
+    { name: "proposalKey", type: "bytes32" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+/** The relay POST body / copyable escape hatch for a proposal vote. */
+export interface SignedProposalVotePayload {
+  kind: "proposal-vote";
+  familyId: Hex;
+  voter: Address;
+  proposalKey: Hex;
+  deadline: string;
+  signature: Hex;
+}
+
+export function buildProposalVotePayload(
+  familyId: Hex,
+  voter: Address,
+  proposalKey: Hex,
+  deadline: bigint,
+  signature: Hex,
+): SignedProposalVotePayload {
+  return {
+    kind: "proposal-vote",
+    familyId,
+    voter,
+    proposalKey,
     deadline: deadline.toString(),
     signature,
   };
