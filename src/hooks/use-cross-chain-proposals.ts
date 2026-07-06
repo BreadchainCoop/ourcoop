@@ -375,6 +375,13 @@ export function useCrossChainProposals(family: FamilyState) {
     [sendSponsored, updateRow],
   );
 
+  /** Retry every chain whose submission failed (re-submit, sponsored or self-paid). */
+  const retryFailed = useCallback(async () => {
+    for (const r of rowsRef.current) {
+      if (r.state === "failed") await submitOnChain(r.chainId);
+    }
+  }, [submitOnChain]);
+
   /** Sign once, then submit to every reachable sibling (gas-sponsored). */
   const startDelivery = useCallback(
     async (
@@ -643,6 +650,8 @@ export function useCrossChainProposals(family: FamilyState) {
     /** Vote on a proposal by its key (sign once). */
     voteOnProposal,
     submitOnChain,
+    /** Retry every chain whose submission failed. */
+    retryFailed,
     reset,
     /** Which action the current delivery is for ("proposal" | "proposal-vote"). */
     actionKind,

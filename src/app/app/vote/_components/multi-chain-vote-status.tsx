@@ -44,12 +44,14 @@ export function MultiChainVoteStatus({
   submitting,
   payload,
   onSubmitOnChain,
+  onRetryFailed,
 }: {
   rows: ChainVoteRow[];
   phase: CrossChainVotePhase;
   submitting: number | null;
   payload: SignedVotePayload | null;
   onSubmitOnChain: (chainId: number) => void;
+  onRetryFailed?: () => void;
 }) {
   return (
     <MultiChainActionStatus
@@ -58,6 +60,7 @@ export function MultiChainVoteStatus({
       submitting={submitting}
       payload={payload}
       onSubmitOnChain={onSubmitOnChain}
+      onRetryFailed={onRetryFailed}
       copy={{
         stateLabel,
         aggregate: ({ counted, total, phase }) =>

@@ -120,6 +120,13 @@ export function useCrossChainVote(family: FamilyState) {
     [sendSponsored, updateRow],
   );
 
+  /** Retry every chain whose submission failed (re-submit, sponsored or self-paid). */
+  const retryFailed = useCallback(async () => {
+    for (const r of rowsRef.current) {
+      if (r.state === "failed") await submitOnChain(r.chainId);
+    }
+  }, [submitOnChain]);
+
   /**
    * Sign the ballot and start delivery. `points[i]` pairs with `recipients[i]`
    * — pass the exact recipient list the allocations were built against (the
@@ -290,6 +297,8 @@ export function useCrossChainVote(family: FamilyState) {
     sign,
     /** Re-submit the signed vote yourself on one chain (sponsored/self-paid). */
     submitOnChain,
+    /** Retry every chain whose submission failed. */
+    retryFailed,
     reset,
     phase,
     rows: rowsState,

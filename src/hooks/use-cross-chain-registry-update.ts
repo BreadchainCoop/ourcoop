@@ -107,6 +107,13 @@ export function useCrossChainRegistryUpdate(family: FamilyState) {
     [sendSponsored, updateRow],
   );
 
+  /** Retry every chain whose submission failed (re-submit, sponsored or self-paid). */
+  const retryFailed = useCallback(async () => {
+    for (const r of rowsRef.current) {
+      if (r.state === "failed") await submitOnChain(r.chainId);
+    }
+  }, [submitOnChain]);
+
   /**
    * Sign the desired recipient set and submit it to every reachable sibling.
    * `recipients` is the full desired set (any order — sorted ascending before
@@ -257,6 +264,8 @@ export function useCrossChainRegistryUpdate(family: FamilyState) {
     sign,
     /** Re-submit the signed update yourself on one chain (sponsored/self-paid). */
     submitOnChain,
+    /** Retry every chain whose submission failed. */
+    retryFailed,
     reset,
     phase,
     rows: rowsState,

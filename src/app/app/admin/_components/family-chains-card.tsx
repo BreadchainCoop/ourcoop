@@ -161,6 +161,7 @@ function SyncEverywhere({
         submitting={sync.submitting}
         payload={sync.payload}
         onSubmitOnChain={sync.submitOnChain}
+        onRetryFailed={sync.retryFailed}
         copy={{
           stateLabel: (row) => {
             switch (row.state) {

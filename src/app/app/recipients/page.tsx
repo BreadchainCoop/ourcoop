@@ -1161,6 +1161,7 @@ function FamilyDemocraticRecipients({
         submitting={cc.submitting}
         payload={cc.payload}
         onSubmitOnChain={cc.submitOnChain}
+        onRetryFailed={cc.retryFailed}
         copy={{
           stateLabel: proposalStateLabel,
           aggregate: ({ counted, total, phase }) =>

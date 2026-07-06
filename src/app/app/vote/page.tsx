@@ -398,6 +398,7 @@ function FamilyVoteForm({ family }: { family: ReturnType<typeof useFamily> }) {
         submitting={ccv.submitting}
         payload={ccv.payload}
         onSubmitOnChain={ccv.submitOnChain}
+        onRetryFailed={ccv.retryFailed}
       />
 
       <Body className="text-surface-grey mt-6 text-sm">

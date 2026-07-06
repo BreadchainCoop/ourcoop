@@ -7,6 +7,7 @@ import {
   SpinnerGap,
   ArrowSquareOut,
   MinusCircle,
+  ArrowClockwise,
   Copy,
   Check,
 } from "@phosphor-icons/react";
@@ -71,8 +72,6 @@ export interface ActionStatusCopy {
   copyLabel: string;
   /** Text under the copy button. */
   copyHint: string;
-  /** Verb for the per-row self-submit button ("Submit on <chain>"). */
-  submitVerb?: string;
 }
 
 /**
@@ -82,8 +81,9 @@ export interface ActionStatusCopy {
  * render this. Delivery is gas-sponsored from the browser (or a self-paid
  * wallet tx); partial success ("… on K of N chains") is a first-class terminal
  * state; a chain that skipped (no power / already synced) is not a failure.
- * Failed rows carry a per-row "Submit from wallet" retry, and the whole signed
- * payload is copyable so anyone can deliver it.
+ * A chain whose submission failed shows a per-row Retry (plus a "Retry all"
+ * when several failed), and the whole signed payload is copyable so anyone can
+ * deliver it.
  */
 export function MultiChainActionStatus({
   rows,
@@ -92,6 +92,7 @@ export function MultiChainActionStatus({
   payload,
   copy,
   onSubmitOnChain,
+  onRetryFailed,
 }: {
   rows: ChainActionRow[];
   phase: CrossChainActionPhase;
@@ -100,6 +101,8 @@ export function MultiChainActionStatus({
   payload: unknown;
   copy: ActionStatusCopy;
   onSubmitOnChain: (chainId: number) => void;
+  /** Retry every chain whose submission failed. */
+  onRetryFailed?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   if (phase === "idle" || rows.length === 0) return null;
@@ -107,10 +110,15 @@ export function MultiChainActionStatus({
   const active = rows.filter((r) => r.state !== "skipped_no_power");
   const counted = active.filter((r) => isCounted(r.state)).length;
   const total = active.length;
-  const submitVerb = copy.submitVerb ?? "Submit on";
 
   const aggregate = copy.aggregate({ counted, total, phase });
   const anyFailed = rows.some((r) => needsRemediation(r.state));
+  const failedCount = rows.filter((r) => r.state === "failed").length;
+  // Nothing is still in flight → the auto-fan-out has settled; a failed row is
+  // now safe to retry (no double-submit racing an in-flight send).
+  const settled = !rows.some(
+    (r) => r.state === "relaying" || r.state === "signing",
+  );
 
   const copyPayload = async () => {
     if (!payload) return;
@@ -166,8 +174,10 @@ export function MultiChainActionStatus({
                   >
                     {submitting === row.chainId ? (
                       <SpinnerGap size={12} className="animate-spin" />
-                    ) : null}
-                    {submitVerb} {shortChainName(row.chainId)}
+                    ) : (
+                      <ArrowClockwise size={12} weight="bold" />
+                    )}
+                    Retry {shortChainName(row.chainId)}
                   </button>
                 </div>
               )}
@@ -175,6 +185,22 @@ export function MultiChainActionStatus({
           </li>
         ))}
       </ul>
+
+      {/* Retry every failed chain at once (submission failed — e.g. a sponsored
+          send didn't go through). Only once nothing is still in flight. */}
+      {settled && failedCount > 1 && onRetryFailed && (
+        <div className="border-paper-2 mt-3 border-t pt-3">
+          <button
+            type="button"
+            onClick={onRetryFailed}
+            disabled={submitting !== null}
+            className="text-core-orange inline-flex items-center gap-1.5 text-sm font-semibold hover:underline disabled:opacity-50"
+          >
+            <ArrowClockwise size={14} weight="bold" />
+            Retry {failedCount} failed chains
+          </button>
+        </div>
+      )}
 
       {anyFailed && payload != null && (
         <div className="border-paper-2 mt-3 border-t pt-3">
