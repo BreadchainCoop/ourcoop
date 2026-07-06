@@ -2,10 +2,10 @@
 
 import type { ReactNode } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Body, Button, Heading4 } from "@breadcoop/ui";
 import { useActiveChain } from "@/hooks/use-chain";
 import { Card } from "@/components/dapp/ui";
+import { WalletButton } from "@/components/dapp/wallet-button";
 
 /**
  * Wraps interactive content: prompts to connect when disconnected, and to
@@ -24,7 +24,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
           Connect a wallet on {target.name} to deposit, vote, and manage the
           protocol.
         </Body>
-        <ConnectButton />
+        <WalletButton />
       </Card>
     );
   }

@@ -2,16 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
-import {
-  useAccount,
-  useSignTypedData,
-  useSwitchChain,
-  useWriteContract,
-} from "wagmi";
+import { useAccount, useSignTypedData } from "wagmi";
 import { recipientRegistryAbi } from "@/lib/abis";
-import { useActiveChainId } from "@/components/instance-provider";
 import { publicClientFor } from "@/lib/instance";
 import { parseTxError } from "@/hooks/use-tx";
+import { useWalletActions } from "@/components/wallet/wallet-actions";
 import {
   CROSS_CHAIN_REGISTRY_UPDATE_TYPES,
   buildRegistryUpdatePayload,
@@ -21,12 +16,6 @@ import {
   voteDeadline,
   type SignedRegistryUpdatePayload,
 } from "@/lib/vote-signature";
-import {
-  getActionStatus,
-  postAction,
-  relayConfigured,
-  type RelayVoteStatus,
-} from "@/lib/relay";
 import {
   CROSS_CHAIN_TERMINAL as TERMINAL,
   type ChainActionRow,
@@ -47,26 +36,23 @@ interface SignedUpdate {
 
 /**
  * Admin "sync recipients everywhere": sign ONE chainless desired-set signature
- * (the full recipient list, strictly ascending) and hand it to the relay — or
- * self-submit from the wallet when no relay is reachable. Each chain computes
- * its own delta and applies it, so one signature heals arbitrary drift.
- * Settlement is confirmed by reading `lastRegistryUpdateNonce(registry) >= nonce`
- * ON-CHAIN; the relay is advisory. Delivery is NOT gated on a chain already
- * matching — the nonce burn kills older floating signatures everywhere.
+ * (the full recipient list, strictly ascending) and submit it to every sibling
+ * chain — gaslessly from the browser via Privy gas sponsorship (or a self-paid
+ * wallet tx). Each chain computes its own delta and applies it, so one signature
+ * heals arbitrary drift. Settlement is confirmed by reading
+ * `lastRegistryUpdateNonce(registry) >= nonce` ON-CHAIN. The signed payload is
+ * also exposed as the "anyone can deliver" copy hatch.
  */
 export function useCrossChainRegistryUpdate(family: FamilyState) {
-  const chainId = useActiveChainId();
-  const { address, chainId: walletChainId } = useAccount();
+  const { address } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
-  const { switchChainAsync } = useSwitchChain();
-  const { writeContractAsync } = useWriteContract();
+  const { sendSponsored } = useWalletActions();
 
   const [phase, setPhase] = useState<CrossChainActionPhase>("idle");
   const [rowsState, setRowsState] = useState<ChainActionRow[]>([]);
   const [payload, setPayload] = useState<SignedRegistryUpdatePayload | null>(
     null,
   );
-  const [relayDown, setRelayDown] = useState(false);
   const [submitting, setSubmitting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,71 +76,16 @@ export function useCrossChainRegistryUpdate(family: FamilyState) {
     [setRows],
   );
 
-  // Fold the relay's advisory report in — never downgrade an on-chain confirm.
-  const applyAdvisory = useCallback(
-    (res: RelayVoteStatus) => {
-      setRows((prev) =>
-        prev.map((r) => {
-          const adv = res.chains.find((c) => c.chainId === r.chainId);
-          if (!adv) return r;
-          if (r.state === "confirmed" || r.state === "superseded") {
-            return { ...r, txHash: r.txHash ?? adv.txHash };
-          }
-          switch (adv.state) {
-            case "pending":
-              return r.state === "submitted"
-                ? r
-                : { ...r, state: "relaying" as const };
-            case "submitted":
-            case "confirmed":
-            case "landed":
-              return {
-                ...r,
-                state: "submitted" as const,
-                txHash: adv.txHash ?? r.txHash,
-              };
-            case "superseded":
-              return { ...r, state: "superseded" as const };
-            case "recipient_mismatch":
-              return { ...r, state: "recipient_mismatch" as const };
-            case "skipped_no_power":
-              // Not meaningful for registry updates; treat as still relaying.
-              return r.state === "submitted"
-                ? r
-                : { ...r, state: "relaying" as const };
-            case "expired":
-              return {
-                ...r,
-                state: "failed" as const,
-                error: "Signature expired before delivery",
-              };
-            case "failed":
-              return {
-                ...r,
-                state: "failed" as const,
-                error: adv.error ?? "Relay delivery failed",
-              };
-            default:
-              return r;
-          }
-        }),
-      );
-    },
-    [setRows],
-  );
-
-  /** Deliver the signed update from the wallet on one specific chain. */
+  /** Deliver the signed update on one specific chain (sponsored or self-paid). */
   const submitOnChain = useCallback(
     async (targetChainId: number) => {
       const u = updateRef.current;
       const target = u?.chains.find((c) => c.chainId === targetChainId);
       if (!u || !target) return;
       setSubmitting(targetChainId);
+      updateRow(targetChainId, { state: "relaying", error: undefined });
       try {
-        if (walletChainId !== targetChainId) {
-          await switchChainAsync({ chainId: targetChainId });
-        }
-        const hash = await writeContractAsync({
+        const hash = await sendSponsored({
           chainId: targetChainId,
           address: target.registry,
           abi: recipientRegistryAbi,
@@ -173,20 +104,26 @@ export function useCrossChainRegistryUpdate(family: FamilyState) {
         setSubmitting(null);
       }
     },
-    [walletChainId, switchChainAsync, writeContractAsync, updateRow],
+    [sendSponsored, updateRow],
   );
 
+  /** Retry every chain whose submission failed (re-submit, sponsored or self-paid). */
+  const retryFailed = useCallback(async () => {
+    for (const r of rowsRef.current) {
+      if (r.state === "failed") await submitOnChain(r.chainId);
+    }
+  }, [submitOnChain]);
+
   /**
-   * Sign the desired recipient set and start delivery. `recipients` is the full
-   * desired set (any order — it is sorted ascending before signing, which is
-   * the canonical form the contract verifies).
+   * Sign the desired recipient set and submit it to every reachable sibling.
+   * `recipients` is the full desired set (any order — sorted ascending before
+   * signing, the canonical form the contract verifies).
    */
   const sign = useCallback(
     async (recipients: readonly Address[]) => {
       const familyId = family.familyId;
       if (!address || !familyId) return;
       setError(null);
-      setRelayDown(false);
       setPayload(null);
       const participants = family.perChain.filter((c) => c.status !== "none");
       const found = participants.filter(
@@ -236,91 +173,39 @@ export function useCrossChainRegistryUpdate(family: FamilyState) {
           registry: c.instance!.recipientRegistry,
         })),
       };
-      const body = buildRegistryUpdatePayload(
-        familyId,
-        address,
-        sorted,
-        nonce,
-        deadline,
-        signature,
-      );
-      setPayload(body);
-      setRows((prev) =>
-        prev.map((r) =>
-          found.some((f) => f.chainId === r.chainId)
-            ? { ...r, state: "relaying" as CrossChainActionState }
-            : r,
+      setPayload(
+        buildRegistryUpdatePayload(
+          familyId,
+          address,
+          sorted,
+          nonce,
+          deadline,
+          signature,
         ),
       );
       setPhase("settling");
-      if (relayConfigured()) {
-        const res = await postAction(body);
-        if (res) {
-          applyAdvisory(res);
-          return;
-        }
+      // Submit to every reachable chain from the browser (gas-sponsored).
+      for (const c of found) {
+        await submitOnChain(c.chainId);
       }
-      // No relay reachable — deliver from the wallet on the active chain; the
-      // other chains get per-row submit buttons + the copyable payload.
-      setRelayDown(true);
-      const self = found.find((c) => c.chainId === chainId) ?? found[0];
-      setRows((prev) =>
-        prev.map((r) =>
-          r.state === "relaying" && r.chainId !== self?.chainId
-            ? { ...r, state: "awaiting_submission" as CrossChainActionState }
-            : r,
-        ),
-      );
-      if (self) await submitOnChain(self.chainId);
     },
     [
       address,
-      chainId,
       family.familyId,
       family.perChain,
       signTypedDataAsync,
       setRows,
-      applyAdvisory,
       submitOnChain,
     ],
   );
 
-  /** Re-POST the payload to the relays; failed rows go back to relaying. */
-  const retryRelay = useCallback(async () => {
-    if (!payload) return;
-    const res = await postAction(payload);
-    if (!res) {
-      setRelayDown(true);
-      return;
-    }
-    setRelayDown(false);
-    setRows((prev) =>
-      prev.map((r) =>
-        r.state === "failed" || r.state === "recipient_mismatch"
-          ? { ...r, state: "relaying" as const, error: undefined }
-          : r,
-      ),
-    );
-    applyAdvisory(res);
-    setPhase("settling");
-  }, [payload, setRows, applyAdvisory]);
-
-  // Settle loop: advisory relay poll + authoritative per-chain nonce reads.
+  // Settle loop: authoritative per-chain nonce reads.
   useEffect(() => {
     if (phase !== "settling") return;
     let cancelled = false;
     const tick = async () => {
       const u = updateRef.current;
       if (!u || cancelled) return;
-      if (relayConfigured() && !relayDown) {
-        const adv = await getActionStatus(
-          u.familyId,
-          "registry-update",
-          u.admin,
-          u.nonce.toString(),
-        ).catch(() => null);
-        if (adv && !cancelled) applyAdvisory(adv);
-      }
       await Promise.all(
         u.chains.map(async (c) => {
           const row = rowsRef.current.find((r) => r.chainId === c.chainId);
@@ -364,31 +249,28 @@ export function useCrossChainRegistryUpdate(family: FamilyState) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [phase, relayDown, applyAdvisory, updateRow, setRows]);
+  }, [phase, updateRow, setRows]);
 
   const reset = useCallback(() => {
     updateRef.current = null;
     setRows(() => []);
     setPhase("idle");
     setPayload(null);
-    setRelayDown(false);
     setError(null);
   }, [setRows]);
 
   return {
-    /** Sign + deliver the full desired recipient set (any order). */
+    /** Sign + submit the full desired recipient set (any order) to every chain. */
     sign,
-    /** Deliver the signed update yourself on one chain (wallet tx). */
+    /** Re-submit the signed update yourself on one chain (sponsored/self-paid). */
     submitOnChain,
-    /** Re-POST the signed update to the relays. */
-    retryRelay,
+    /** Retry every chain whose submission failed. */
+    retryFailed,
     reset,
     phase,
     rows: rowsState,
-    /** The signed update as relay-POST JSON — the "anyone can deliver" hatch. */
+    /** The signed update as JSON — the "anyone can deliver" copy hatch. */
     payload,
-    /** True when every configured relay is unreachable (fallback mode). */
-    relayDown,
     submitting,
     error,
     isBusy: phase === "signing" || phase === "settling",

@@ -4,6 +4,3 @@ contracts
 .context
 pnpm-lock.yaml
 public
-relay/dist
-relay/package-lock.json
-relay/*.db

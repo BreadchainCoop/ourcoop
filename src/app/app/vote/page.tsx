@@ -395,11 +395,10 @@ function FamilyVoteForm({ family }: { family: ReturnType<typeof useFamily> }) {
       <MultiChainVoteStatus
         rows={ccv.rows}
         phase={ccv.phase}
-        relayDown={ccv.relayDown}
         submitting={ccv.submitting}
         payload={ccv.payload}
         onSubmitOnChain={ccv.submitOnChain}
-        onRetryRelay={ccv.retryRelay}
+        onRetryFailed={ccv.retryFailed}
       />
 
       <Body className="text-surface-grey mt-6 text-sm">

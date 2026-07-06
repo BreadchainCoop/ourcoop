@@ -2,9 +2,9 @@
 
 import type { ReactNode } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Button } from "@breadcoop/ui";
 import { useActiveChain } from "@/hooks/use-chain";
+import { useWalletActions } from "@/components/wallet/wallet-actions";
 
 type Variant = "primary" | "secondary" | "destructive";
 
@@ -35,7 +35,7 @@ export function ActionButton({
   chainless?: boolean;
 }) {
   const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
+  const { connect } = useWalletActions();
   const { switchChain, isPending } = useSwitchChain();
   const target = useActiveChain().chain;
 
@@ -45,7 +45,7 @@ export function ActionButton({
         app="fund"
         variant="primary"
         className={className}
-        onClick={openConnectModal}
+        onClick={connect}
       >
         Connect wallet
       </Button>

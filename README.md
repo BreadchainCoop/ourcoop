@@ -69,15 +69,21 @@ you pick multiple chains; the instances are linked on-chain by a deterministic
 
 Voting is **sign once, count everywhere**: family instances use a
 chain-agnostic EIP-712 signature (`castCrossChainVote`) that is valid on every
-sibling chain, delivered by the [relay service](./relay/) (HTTP API + on-chain
-listener). The same ballot lands on every chain, weighted by the voter's stake
-on that chain. The relay can only censor — never forge — and delivery is
-permissionless, so anyone can re-submit a censored vote (the signature is
-re-emitted in the `CrossChainVoteCast` event).
+sibling chain. The same ballot lands on every chain, weighted by the voter's
+stake on that chain. Delivery is **serverless** — the browser submits the signed
+action to each chain itself, **gaslessly**, via [Privy](https://privy.io) native
+gas sponsorship ("App pays", EIP-7702). The same applies to democratic recipient
+governance (proposals + approve/deny votes) and admin "sync recipients
+everywhere". No relay, no server: the app is a pure static export.
 
-Point the frontend at one or more relays with `NEXT_PUBLIC_RELAY_URLS`
-(comma-separated). Without a relay the vote page falls back to wallet
-submission per chain plus a copyable signed-vote payload.
+The submitter is irrelevant on-chain — the entrypoints verify the voter/admin
+from the signature (`ecrecover`), so delivery stays permissionless. If a
+sponsored send fails, the UI offers a per-chain wallet submit and a copyable
+signed payload anyone can deliver.
+
+Set `NEXT_PUBLIC_PRIVY_APP_ID` and enable "App pays" gas sponsorship for the
+target chains in the Privy dashboard. Without it, the app runs with a plain
+injected wallet (self-paid gas) — handy for local dev and e2e.
 
 ## Releases
 

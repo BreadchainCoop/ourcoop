@@ -13,10 +13,15 @@ const nextConfig: NextConfig = {
   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
   webpack: (config) => {
     // Silence optional-dep resolution warnings from the wallet/web3 tree.
+    // Privy pulls optional Solana / Farcaster / Stripe integrations we don't
+    // use; stub them so the static export builds.
     config.resolve.fallback = {
       ...config.resolve.fallback,
       "pino-pretty": false,
       "@react-native-async-storage/async-storage": false,
+      "@stripe/crypto": false,
+      "@stripe/stripe-js": false,
+      "@farcaster/mini-app-solana": false,
     };
     return config;
   },

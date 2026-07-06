@@ -3,17 +3,17 @@ import type { Hex } from "viem";
 /**
  * Shared per-chain delivery model for every sign-once cross-chain action (votes,
  * admin registry updates, democratic proposals + proposal votes). One signature
- * is delivered to every sibling chain by the relay — or self-submitted from the
- * wallet when no relay is reachable — and settlement is always confirmed by an
- * ON-CHAIN read, never the relay (which is advisory: it can censor, never forge;
- * anyone can deliver the copied payload). Partial success is a first-class
- * terminal state, remediable per row.
+ * is submitted to every sibling chain from the browser — gaslessly via Privy gas
+ * sponsorship, or a self-paid wallet tx — and settlement is always confirmed by
+ * an ON-CHAIN read (anyone can also deliver the copied payload). Partial success
+ * is a first-class terminal state, remediable per row.
  */
 
 /** Per-chain delivery state for one signed action. */
 export type CrossChainActionState =
   | "idle"
   | "signing"
+  // In flight: being submitted to this chain (sponsored or self-paid).
   | "relaying"
   | "submitted"
   | "confirmed"
@@ -21,9 +21,6 @@ export type CrossChainActionState =
   | "skipped_no_power"
   | "recipient_mismatch"
   | "unreachable"
-  // Relay down: this chain needs a wallet submission (or anyone can deliver the
-  // copied payload). Not terminal — the settle poll still flips it if it lands.
-  | "awaiting_submission"
   | "failed";
 
 export interface ChainActionRow {
@@ -51,12 +48,11 @@ export const CROSS_CHAIN_SETTLED = new Set<CrossChainActionState>([
   "superseded",
 ]);
 
-/** A row that still needs the user's help (retry relay / self-submit). */
+/** A row that still needs the user's help (retry from wallet). */
 export function needsRemediation(state: CrossChainActionState): boolean {
   return (
     state === "failed" ||
     state === "recipient_mismatch" ||
-    state === "unreachable" ||
-    state === "awaiting_submission"
+    state === "unreachable"
   );
 }

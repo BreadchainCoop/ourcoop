@@ -61,7 +61,7 @@ const FLOWS: Flow[] = [
       "Every action page is browsable before connecting — forms and live on-chain data render immediately. Connecting is only required to sign.",
     steps: [
       "Click Connect Wallet in the top bar.",
-      "Pick your wallet in the RainbowKit modal (MetaMask, Rabby, WalletConnect, …).",
+      "Sign in with email or a wallet (MetaMask, Rabby, WalletConnect, …). New accounts get an embedded wallet with gasless cross-chain voting.",
       "Approve the connection on Gnosis Chain (id 100). Wrong network? The button switches you.",
     ],
     media: "connect-wallet.gif",

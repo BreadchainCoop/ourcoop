@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { cn } from "@/lib/utils";
+import { WalletButton } from "@/components/dapp/wallet-button";
 import { useRegistryOwner } from "@/hooks/use-recipients";
 import { InstanceSwitcher } from "@/components/dapp/instance-switcher";
 import { useDemoMode } from "@/components/demo-mode-provider";
@@ -82,11 +82,7 @@ export function DappNav() {
         {/* Right: utilities */}
         <div className="ml-auto flex items-center gap-2 lg:ml-0">
           <DemoToggle />
-          <ConnectButton
-            showBalance={false}
-            accountStatus="address"
-            chainStatus="icon"
-          />
+          <WalletButton />
         </div>
       </nav>
 
