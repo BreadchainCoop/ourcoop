@@ -12,4 +12,9 @@ interface IToken is IERC20 {
     function finalizeNewYieldClaimer() external;
     function setYieldClaimer(address yieldClaimer) external;
     function yieldAccrued() external view returns (uint256);
+    function totalYieldAccrued() external view returns (uint256);
+    function setYieldSplit(uint16 keepBps) external;
+    function yieldSplitOf(address account) external view returns (uint16);
+    function keptYieldOf(address account) external view returns (uint256);
+    function claimKeptYield(address receiver) external;
 }

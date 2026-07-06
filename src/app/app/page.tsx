@@ -129,6 +129,9 @@ export default function PortfolioPage() {
         >
           Deposit
         </Button>
+        <Button app="fund" variant="secondary" as={Link} href="/app/yield">
+          Yield split
+        </Button>
         <Button app="fund" variant="secondary" as={Link} href="/app/vote">
           Vote
         </Button>

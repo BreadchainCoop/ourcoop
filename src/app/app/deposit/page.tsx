@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useAccount } from "wagmi";
 import { Body, Caption } from "@breadcoop/ui";
 import { Card, PageHeader } from "@/components/dapp/ui";
 import { AmountField } from "@/components/dapp/amount-field";
@@ -17,6 +19,7 @@ import {
   useNativeBalance,
   useTokenBalance,
   useWrapped,
+  useYieldSplit,
 } from "@/hooks/use-token";
 
 export default function DepositPage() {
@@ -162,6 +165,25 @@ function DepositForm() {
           {fmt(stake.data)} {symbol}
         </span>
       </Body>
+
+      <YieldSplitHint />
     </Card>
+  );
+}
+
+/** Reminds depositors of their current yield split, when the token supports it. */
+function YieldSplitHint() {
+  const { keepBps, supported } = useYieldSplit();
+  const { isConnected } = useAccount();
+  if (!supported || !isConnected || keepBps === undefined) return null;
+  const give = 100 - keepBps / 100;
+  return (
+    <Caption className="text-surface-grey mt-2 block">
+      Yield split: you give {give}% of your yield to recipients
+      {keepBps > 0 ? ` and keep ${100 - give}%` : ""} —{" "}
+      <Link href="/app/yield" className="text-core-orange underline">
+        adjust
+      </Link>
+    </Caption>
   );
 }
