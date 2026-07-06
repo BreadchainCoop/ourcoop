@@ -33,6 +33,7 @@ const LINKS = [
   { href: "/app/withdraw", label: "Withdraw" },
   { href: "/app/vote", label: "Vote" },
   { href: "/app/distribute", label: "Distribute" },
+  { href: "/app/history", label: "History" },
   { href: "/app/deploy", label: "Deploy" },
 ];
 
