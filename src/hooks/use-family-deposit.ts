@@ -129,6 +129,8 @@ export function useFamilyDeposit(family: FamilyState) {
   useEffect(() => {
     if (!address || found.length === 0) {
       setChains([]);
+      setRows([]);
+      setBusyChain(null);
       setIsLoading(false);
       return;
     }
