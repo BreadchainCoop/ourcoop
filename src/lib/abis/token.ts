@@ -30,6 +30,13 @@ export const tokenAbi = [
   },
   {
     type: "function",
+    name: "YIELD_SPLIT_BPS",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "allowance",
     inputs: [
       { name: "owner", type: "address", internalType: "address" },
@@ -91,6 +98,13 @@ export const tokenAbi = [
       },
     ],
     stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "claimKeptYield",
+    inputs: [{ name: "receiver_", type: "address", internalType: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
   },
   {
     type: "function",
@@ -212,6 +226,13 @@ export const tokenAbi = [
   },
   {
     type: "function",
+    name: "keptYieldOf",
+    inputs: [{ name: "account_", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "mint",
     inputs: [
       { name: "receiver_", type: "address", internalType: "address" },
@@ -322,6 +343,13 @@ export const tokenAbi = [
   },
   {
     type: "function",
+    name: "setYieldSplit",
+    inputs: [{ name: "keepBps_", type: "uint16", internalType: "uint16" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "symbol",
     inputs: [],
     outputs: [{ name: "", type: "string", internalType: "string" }],
@@ -330,6 +358,13 @@ export const tokenAbi = [
   {
     type: "function",
     name: "totalSupply",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "totalYieldAccrued",
     inputs: [],
     outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
     stateMutability: "view",
@@ -374,6 +409,13 @@ export const tokenAbi = [
     name: "yieldClaimer",
     inputs: [],
     outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "yieldSplitOf",
+    inputs: [{ name: "account_", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint16", internalType: "uint16" }],
     stateMutability: "view",
   },
   {
@@ -499,6 +541,31 @@ export const tokenAbi = [
   },
   {
     type: "event",
+    name: "KeptYieldClaimed",
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "receiver",
+        type: "address",
+        indexed: false,
+        internalType: "address",
+      },
+      {
+        name: "amount",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
     name: "Minted",
     inputs: [
       {
@@ -602,6 +669,25 @@ export const tokenAbi = [
     ],
     anonymous: false,
   },
+  {
+    type: "event",
+    name: "YieldSplitSet",
+    inputs: [
+      {
+        name: "account",
+        type: "address",
+        indexed: true,
+        internalType: "address",
+      },
+      {
+        name: "keepBps",
+        type: "uint16",
+        indexed: false,
+        internalType: "uint16",
+      },
+    ],
+    anonymous: false,
+  },
   { type: "error", name: "AlreadyInitialized", inputs: [] },
   { type: "error", name: "AlreadySetClaimer", inputs: [] },
   { type: "error", name: "BurnZero", inputs: [] },
@@ -682,6 +768,7 @@ export const tokenAbi = [
     ],
   },
   { type: "error", name: "InvalidInitialization", inputs: [] },
+  { type: "error", name: "InvalidYieldSplit", inputs: [] },
   { type: "error", name: "IsCollateral", inputs: [] },
   { type: "error", name: "MintZero", inputs: [] },
   { type: "error", name: "NativeTransferFailed", inputs: [] },
