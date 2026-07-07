@@ -70,6 +70,8 @@ export function PrivyWalletActions({ children }: { children: ReactNode }) {
     connect: () => login(),
     disconnect: () => void logout(),
     sendSponsored,
+    // Embedded Privy wallets are gas-sponsored; external wallets self-pay.
+    sponsored: activeIsEmbedded(),
   };
 
   return (
