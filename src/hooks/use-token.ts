@@ -88,6 +88,53 @@ export function useTokenStats() {
   };
 }
 
+/**
+ * The share of their yield an account keeps (bps, 0 = donates all), plus
+ * whether the instance's token supports yield splits at all — deployments
+ * that predate the feature revert on the read, so `supported` doubles as
+ * feature detection. Probes with the zero address before a wallet connects.
+ */
+export function useYieldSplit(account?: Address) {
+  const a = useInstance();
+  const chainId = useActiveChainId();
+  const { address } = useAccount();
+  const owner = account ?? address;
+  const read = useReadContract({
+    address: a.token,
+    abi: tokenAbi,
+    functionName: "yieldSplitOf",
+    args: [owner ?? zeroAddress],
+    chainId,
+    query: { retry: false },
+  });
+  return {
+    keepBps: read.data as number | undefined,
+    supported: read.isError
+      ? false
+      : read.data !== undefined
+        ? true
+        : undefined,
+    isLoading: read.isLoading,
+    refetch: read.refetch,
+  };
+}
+
+/** An account's claimable kept yield (settled + still-accruing share). */
+export function useKeptYield(account?: Address) {
+  const a = useInstance();
+  const chainId = useActiveChainId();
+  const { address } = useAccount();
+  const owner = account ?? address;
+  return useReadContract({
+    address: a.token,
+    abi: tokenAbi,
+    functionName: "keptYieldOf",
+    args: owner ? [owner] : undefined,
+    chainId,
+    query: { enabled: Boolean(owner), retry: false, ...LIVE },
+  });
+}
+
 export function useVotes(account?: Address) {
   const a = useInstance();
   const chainId = useActiveChainId();
@@ -223,6 +270,35 @@ export function useWithdraw() {
       args: [amount, receiver ?? address ?? zeroAddress],
     });
   return { withdraw, ...tx };
+}
+
+/** Update the caller's yield split: keepBps of their yield share is kept, the rest donated. */
+export function useSetYieldSplit() {
+  const a = useInstance();
+  const tx = useTx();
+  const setSplit = (keepBps: number) =>
+    tx.run({
+      address: a.token,
+      abi: tokenAbi,
+      functionName: "setYieldSplit",
+      args: [keepBps],
+    });
+  return { setSplit, ...tx };
+}
+
+/** Claim the caller's kept yield, minted as the project token to `receiver`. */
+export function useClaimKeptYield() {
+  const a = useInstance();
+  const { address } = useAccount();
+  const tx = useTx();
+  const claim = (receiver?: Address) =>
+    tx.run({
+      address: a.token,
+      abi: tokenAbi,
+      functionName: "claimKeptYield",
+      args: [receiver ?? address ?? zeroAddress],
+    });
+  return { claim, ...tx };
 }
 
 /** Manually (re)delegate voting power to an address (self by default). */

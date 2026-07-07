@@ -31,6 +31,7 @@ const LINKS = [
   { href: "/app", label: "Portfolio" },
   { href: "/app/deposit", label: "Deposit" },
   { href: "/app/withdraw", label: "Withdraw" },
+  { href: "/app/yield", label: "Yield" },
   { href: "/app/vote", label: "Vote" },
   { href: "/app/distribute", label: "Distribute" },
   { href: "/app/history", label: "History" },

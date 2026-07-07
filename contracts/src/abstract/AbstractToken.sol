@@ -18,7 +18,8 @@ interface IContractURI {
 /// @author BreadKit
 /// @notice Abstract base contract for yield-bearing ERC20 tokens with voting delegation
 /// @dev Extends ERC20VotesUpgradeable with yield claiming, a two-phase yield claimer transfer
-///      mechanism (14-day timelock), and automatic delegation on transfers/mints.
+///      mechanism (14-day timelock), automatic delegation on transfers/mints, and per-holder
+///      yield splits (each holder chooses how much of their yield share to keep vs donate).
 ///      Inheriting contracts must implement _deposit, _remit, and _yieldAccrued.
 abstract contract AbstractToken is ERC20VotesUpgradeable, Ownable, IToken {
     /// @notice Thrown when attempting to mint zero tokens
@@ -31,6 +32,8 @@ abstract contract AbstractToken is ERC20VotesUpgradeable, Ownable, IToken {
     error YieldInsufficient();
     /// @notice Thrown when a non-claimer address attempts to claim yield
     error OnlyClaimer();
+    /// @notice Thrown when a yield split exceeds 100% (10,000 bps)
+    error InvalidYieldSplit();
     /// @notice Thrown when finalizing with no pending claimer
     error NoPendingClaimer();
     /// @notice Thrown when preparing a new claimer while one is already pending
@@ -65,6 +68,45 @@ abstract contract AbstractToken is ERC20VotesUpgradeable, Ownable, IToken {
     function _getAbstractTokenStorage() internal pure returns (AbstractTokenStorage storage $) {
         assembly {
             $.slot := ABSTRACT_TOKEN_STORAGE
+        }
+    }
+
+    // ============ Yield Split Storage ============
+
+    /// @notice Basis-points denominator for yield splits (100% = 10,000)
+    uint256 public constant YIELD_SPLIT_BPS = 10_000;
+
+    /// @dev Precision scale for the yield-per-token accumulator. High enough that the
+    ///      truncation lost per accrual (supply / YIELD_PRECISION wei) stays sub-wei for
+    ///      any realistic supply; any dust lands in the donated pool.
+    uint256 private constant YIELD_PRECISION = 1e27;
+
+    /// @custom:storage-location erc7201:crowdstake.storage.YieldSplit
+    struct YieldSplitStorage {
+        /// @notice Cumulative yield attributed per token, scaled by YIELD_PRECISION
+        uint256 accYieldPerToken;
+        /// @notice Raw yield already pushed through the accumulator (falls when claims mint)
+        uint256 accountedYield;
+        /// @notice Sum of balance * keepBps over all holders with a nonzero split
+        uint256 keepWeight;
+        /// @notice Sum of balance * keepBps * index over the same holders
+        uint256 keepWeightIndex;
+        /// @notice Total settled kept yield awaiting claims
+        uint256 keptYieldTotal;
+        /// @notice Share of each holder's yield they keep, in bps (default 0 = donate all)
+        mapping(address => uint16) keepBps;
+        /// @notice accYieldPerToken at each holder's last settlement
+        mapping(address => uint256) index;
+        /// @notice Settled, claimable kept yield per holder
+        mapping(address => uint256) keptYield;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("crowdstake.storage.YieldSplit")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant YIELD_SPLIT_STORAGE = 0xf738586bf43cceca564b7190bdeb6371d7e569504429f728e4554e1d8c5e6400;
+
+    function _getYieldSplitStorage() internal pure returns (YieldSplitStorage storage $) {
+        assembly {
+            $.slot := YIELD_SPLIT_STORAGE
         }
     }
 
@@ -111,6 +153,10 @@ abstract contract AbstractToken is ERC20VotesUpgradeable, Ownable, IToken {
     event PendingYieldClaimerSet(address yieldClaimer);
     /// @notice Emitted when yield is claimed
     event ClaimedYield(uint256 amount);
+    /// @notice Emitted when a holder updates their yield split
+    event YieldSplitSet(address indexed account, uint16 keepBps);
+    /// @notice Emitted when a holder claims their kept yield
+    event KeptYieldClaimed(address indexed account, address receiver, uint256 amount);
 
     /// @dev MUST implement in derived contract
     /// logic to deposit user collateral into yield bearing position
@@ -178,22 +224,85 @@ abstract contract AbstractToken is ERC20VotesUpgradeable, Ownable, IToken {
         emit Burned(receiver_, amount_);
     }
 
-    /// @notice Claims accrued yield and mints it as tokens to the receiver
-    /// @dev Only callable by the authorized yield claimer
+    /// @notice Claims accrued donated yield and mints it as tokens to the receiver
+    /// @dev Only callable by the authorized yield claimer. Only the donated portion of the
+    ///      vault surplus is claimable here; holders' kept shares stay reserved for them.
     /// @param amount_ Amount of yield to claim
     /// @param receiver_ Address to receive the minted yield tokens
     function claimYield(uint256 amount_, address receiver_) external virtual {
         AbstractTokenStorage storage $ = _getAbstractTokenStorage();
         if (msg.sender != $.yieldClaimer) revert OnlyClaimer();
         if (amount_ == 0) revert ClaimZero();
-        uint256 yield = _yieldAccrued();
+        _accrueGlobalYield();
+        uint256 yield = _donatedYieldAccrued();
         if (yield == 0) revert YieldInsufficient();
         if (yield < amount_) revert YieldInsufficient();
 
         _mint(receiver_, amount_);
         if (this.delegates(receiver_) == address(0)) _delegate(receiver_, receiver_);
+        // The minted claim consumed vault surplus; keep the high-water mark in sync.
+        _getYieldSplitStorage().accountedYield -= amount_;
 
         emit ClaimedYield(amount_);
+    }
+
+    // ============ Yield Split ============
+
+    /// @notice Sets the caller's yield split: the share of their yield they keep for themselves
+    /// @dev Applies from now on — yield attributed before this call keeps the previous split.
+    /// @param keepBps_ Basis points (0–10,000) of the caller's yield share to keep; the rest is donated
+    function setYieldSplit(uint16 keepBps_) external {
+        if (keepBps_ > YIELD_SPLIT_BPS) revert InvalidYieldSplit();
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        _accrueGlobalYield();
+        _settleAndDetach(msg.sender);
+        // Re-baseline so only yield accrued after this change uses the new split.
+        $.index[msg.sender] = $.accYieldPerToken;
+        $.keepBps[msg.sender] = keepBps_;
+        _attach(msg.sender);
+
+        emit YieldSplitSet(msg.sender, keepBps_);
+    }
+
+    /// @notice Returns the share of their yield an account keeps, in bps (0 = donates all)
+    function yieldSplitOf(address account_) external view returns (uint16) {
+        return _getYieldSplitStorage().keepBps[account_];
+    }
+
+    /// @notice Returns an account's kept yield: settled balance plus unsettled share at its current split
+    function keptYieldOf(address account_) external view returns (uint256) {
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        uint256 kept = $.keptYield[account_];
+        uint256 bps = $.keepBps[account_];
+        if (bps == 0) return kept;
+        uint256 acc = _simulatedAccYieldPerToken();
+        uint256 idx = $.index[account_];
+        if (acc > idx) {
+            kept += balanceOf(account_) * (acc - idx) / YIELD_PRECISION * bps / YIELD_SPLIT_BPS;
+        }
+        return kept;
+    }
+
+    /// @notice Claims the caller's kept yield, minting it as tokens to the receiver
+    /// @param receiver_ Address to receive the minted yield tokens
+    function claimKeptYield(address receiver_) external {
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        _accrueGlobalYield();
+        _settleAndDetach(msg.sender);
+        _attach(msg.sender);
+
+        uint256 amount = $.keptYield[msg.sender];
+        if (amount == 0) revert ClaimZero();
+        if (_yieldAccrued() < amount) revert YieldInsufficient();
+        $.keptYield[msg.sender] = 0;
+        $.keptYieldTotal -= amount;
+
+        _mint(receiver_, amount);
+        if (this.delegates(receiver_) == address(0)) _delegate(receiver_, receiver_);
+        // The minted claim consumed vault surplus; keep the high-water mark in sync.
+        $.accountedYield -= amount;
+
+        emit KeptYieldClaimed(msg.sender, receiver_, amount);
     }
 
     /// @notice Sets the initial yield claimer address (one-time only)
@@ -253,9 +362,104 @@ abstract contract AbstractToken is ERC20VotesUpgradeable, Ownable, IToken {
         return true;
     }
 
-    /// @notice Returns the total unclaimed accrued yield
+    /// @notice Returns the unclaimed donated yield — the pool the yield claimer can distribute
+    /// @dev Excludes holders' kept shares (settled and unsettled). Equals the full vault
+    ///      surplus while no holder has set a nonzero yield split.
     function yieldAccrued() external view returns (uint256) {
+        return _donatedYieldAccrued();
+    }
+
+    /// @notice Returns the total unclaimed vault surplus: donated pool plus all kept shares
+    function totalYieldAccrued() external view returns (uint256) {
         return _yieldAccrued();
+    }
+
+    // ============ Yield Split Internals ============
+
+    /// @dev Attributes any fresh vault surplus to current holders via the accumulator.
+    ///      With no holders the surplus stays in the donated pool.
+    function _accrueGlobalYield() internal {
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        uint256 raw = _yieldAccrued();
+        uint256 accounted = $.accountedYield;
+        if (raw <= accounted) return;
+        uint256 supply = totalSupply();
+        if (supply > 0) {
+            $.accYieldPerToken += (raw - accounted) * YIELD_PRECISION / supply;
+        }
+        $.accountedYield = raw;
+    }
+
+    /// @dev The accumulator as if _accrueGlobalYield ran now — lets views stay current
+    ///      without mutating state.
+    function _simulatedAccYieldPerToken() private view returns (uint256 acc) {
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        acc = $.accYieldPerToken;
+        uint256 raw = _yieldAccrued();
+        uint256 accounted = $.accountedYield;
+        uint256 supply = totalSupply();
+        if (raw > accounted && supply > 0) {
+            acc += (raw - accounted) * YIELD_PRECISION / supply;
+        }
+    }
+
+    /// @dev Vault surplus minus every holder's kept share (settled and unsettled).
+    ///      The keep-weight aggregates make this O(1): the unsettled kept yield across
+    ///      all holders is (acc * Σbal·bps − Σbal·bps·idx) / precision / bps-scale.
+    function _donatedYieldAccrued() private view returns (uint256) {
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        uint256 raw = _yieldAccrued();
+        uint256 unsettledKept =
+            (_simulatedAccYieldPerToken() * $.keepWeight - $.keepWeightIndex) / YIELD_PRECISION / YIELD_SPLIT_BPS;
+        uint256 reserved = $.keptYieldTotal + unsettledKept;
+        return raw > reserved ? raw - reserved : 0;
+    }
+
+    /// @dev Credits an account's pending kept yield and removes its terms from the
+    ///      keep-weight aggregates. Callers must _attach again after any balance or
+    ///      split change. No-op for accounts that donate everything (keepBps == 0).
+    function _settleAndDetach(address account_) internal {
+        if (account_ == address(0)) return;
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        uint256 bps = $.keepBps[account_];
+        if (bps == 0) return;
+        uint256 balance = balanceOf(account_);
+        uint256 acc = $.accYieldPerToken;
+        uint256 idx = $.index[account_];
+        if (acc > idx) {
+            uint256 kept = balance * (acc - idx) / YIELD_PRECISION * bps / YIELD_SPLIT_BPS;
+            if (kept > 0) {
+                $.keptYield[account_] += kept;
+                $.keptYieldTotal += kept;
+            }
+        }
+        uint256 weight = balance * bps;
+        $.keepWeight -= weight;
+        $.keepWeightIndex -= weight * idx;
+        $.index[account_] = acc;
+    }
+
+    /// @dev Adds an account's current balance/split terms to the keep-weight aggregates.
+    ///      Must mirror a prior _settleAndDetach so each account is counted exactly once.
+    function _attach(address account_) internal {
+        if (account_ == address(0)) return;
+        YieldSplitStorage storage $ = _getYieldSplitStorage();
+        uint256 bps = $.keepBps[account_];
+        if (bps == 0) return;
+        uint256 weight = balanceOf(account_) * bps;
+        $.keepWeight += weight;
+        $.keepWeightIndex += weight * $.index[account_];
+    }
+
+    /// @dev Settles both parties' yield-split accounting around every balance change so
+    ///      each account's kept share reflects its balance over time.
+    function _update(address from_, address to_, uint256 value_) internal virtual override {
+        _accrueGlobalYield();
+        _settleAndDetach(from_);
+        if (to_ != from_) _settleAndDetach(to_);
+        super._update(from_, to_, value_);
+        _attach(from_);
+        if (to_ != from_) _attach(to_);
     }
 
     /// @dev Mints tokens to the receiver and auto-delegates if no delegate is set
