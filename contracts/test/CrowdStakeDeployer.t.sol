@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {CrowdStakeFactory} from "../src/CrowdStakeFactory.sol";
 import {CrowdStakeDeployer} from "../src/CrowdStakeDeployer.sol";
 
@@ -17,6 +18,7 @@ import {EqualDistributionStrategy} from "../src/implementation/strategies/EqualD
 import {AdminRecipientRegistry} from "../src/implementation/registries/AdminRecipientRegistry.sol";
 import {VotingRecipientRegistry} from "../src/implementation/registries/VotingRecipientRegistry.sol";
 import {SexyDaiYield} from "../src/implementation/token/SexyDaiYield.sol";
+import {IVotingPowerStrategy} from "../src/interfaces/IVotingPowerStrategy.sol";
 import {AbstractToken} from "../src/abstract/AbstractToken.sol";
 
 interface IOwnable {
@@ -81,6 +83,17 @@ contract CrowdStakeDeployerTest is Test {
         );
     }
 
+    function _noOverrides() internal pure returns (CrowdStakeDeployer.ModuleOverrides memory) {
+        return CrowdStakeDeployer.ModuleOverrides({
+            recipientRegistry: address(0),
+            token: address(0),
+            cycleModule: address(0),
+            votingModule: address(0),
+            distributionStrategy: address(0),
+            votingPowerStrategies: new address[](0)
+        });
+    }
+
     function _adminParams(bytes32 salt) internal pure returns (CrowdStakeDeployer.Params memory) {
         return CrowdStakeDeployer.Params({
             owner: OWNER,
@@ -95,7 +108,8 @@ contract CrowdStakeDeployerTest is Test {
             distributionKind: 0, // proportional
             tokenImageURI: "",
             bannerImageURI: "",
-            crossChain: false
+            crossChain: false,
+            overrides: _noOverrides()
         });
     }
 
@@ -117,7 +131,8 @@ contract CrowdStakeDeployerTest is Test {
             distributionKind: 0, // proportional
             tokenImageURI: "",
             bannerImageURI: "",
-            crossChain: false
+            crossChain: false,
+            overrides: _noOverrides()
         });
     }
 
@@ -438,5 +453,136 @@ contract CrowdStakeDeployerTest is Test {
         // Sibling recorded under the voting-kind id.
         (,,,,,,, address votingModule) = deployer.familyInstances(votingFamilyId);
         assertEq(votingModule, i.votingModule, "sibling recorded under voting-kind id");
+    }
+
+    // ---- Module overrides (custom pre-deployed implementations) ----
+
+    function test_RegistryOverride() public {
+        address reg = Clones.clone(address(new AdminRecipientRegistry()));
+        AdminRecipientRegistry(reg).initialize(OWNER);
+
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-reg");
+        p.overrides.recipientRegistry = reg;
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(i.registry, reg, "override used verbatim");
+        assertEq(
+            address(AbstractDistributionManager(i.distributionManager).recipientRegistry()), reg, "dm wired to override"
+        );
+        assertEq(IOwnable(reg).owner(), OWNER, "registry ownership untouched");
+    }
+
+    function test_TokenOverride_SkipsClaimerAndOwnership() public {
+        address tok = Clones.clone(address(new SexyDaiYield(WXDAI, SXDAI)));
+        SexyDaiYield(payable(tok)).initialize("Custom", "CSTM", OWNER);
+
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-tok");
+        p.overrides.token = tok;
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(i.token, tok, "override used verbatim");
+        assertEq(address(AbstractDistributionManager(i.distributionManager).baseToken()), tok, "dm wired to override");
+        assertEq(IOwnable(tok).owner(), OWNER, "token stays caller-owned");
+        // Deployer cannot set the claimer on a caller-owned token — the caller does it.
+        assertEq(AbstractToken(tok).yieldClaimer(), address(0), "claimer left for the caller");
+        vm.prank(OWNER);
+        AbstractToken(tok).setYieldClaimer(i.distributionManager);
+        assertEq(AbstractToken(tok).yieldClaimer(), i.distributionManager, "caller follow-up wires claimer");
+    }
+
+    function test_CycleOverride_SkipsWiringAndOwnership() public {
+        address cyc = Clones.clone(address(new CycleModule()));
+        AbstractCycleModule(cyc).initialize(77, OWNER);
+
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-cyc");
+        p.overrides.cycleModule = cyc;
+        p.cycleLength = 0; // ignored when overridden — must not revert
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(i.cycleModule, cyc, "override used verbatim");
+        assertEq(AbstractCycleModule(cyc).distributionManager(), address(0), "dm wiring left for the caller");
+        vm.prank(OWNER);
+        AbstractCycleModule(cyc).setDistributionManager(i.distributionManager);
+        assertEq(AbstractCycleModule(cyc).distributionManager(), i.distributionManager, "caller follow-up wires dm");
+    }
+
+    function test_VotingPowerStrategiesOverride() public {
+        address[] memory vps = new address[](2);
+        vps[0] = address(new MockVotingPower());
+        vps[1] = address(new MockVotingPower());
+
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-vps");
+        p.overrides.votingPowerStrategies = vps;
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(i.votingPowerStrategy, vps[0], "first override reported");
+        BasisPointsVotingModule vm_ = BasisPointsVotingModule(i.votingModule);
+        assertEq(address(vm_.votingPowerStrategies(0)), vps[0], "strategy 0 wired");
+        assertEq(address(vm_.votingPowerStrategies(1)), vps[1], "strategy 1 wired");
+    }
+
+    function test_VotingModuleOverride_InitializedByCallerAfter() public {
+        address vmOvr = Clones.clone(address(new BasisPointsVotingModule()));
+
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-vm");
+        p.overrides.votingModule = vmOvr;
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(i.votingModule, vmOvr, "override used verbatim");
+        assertEq(
+            address(AbstractDistributionManager(i.distributionManager).votingModule()), vmOvr, "dm wired to override"
+        );
+        assertEq(i.votingPowerStrategy, address(0), "no canonical TWVP for a custom module");
+
+        // Caller initializes the module afterwards with the fresh DM.
+        IVotingPowerStrategy[] memory vps = new IVotingPowerStrategy[](1);
+        vps[0] = IVotingPowerStrategy(address(new MockVotingPower()));
+        BasisPointsVotingModule(vmOvr).initialize(100, vps, i.distributionManager, OWNER);
+        assertEq(IOwnable(vmOvr).owner(), OWNER, "caller-init sets owner");
+    }
+
+    function test_StrategyOverride_InitializedByCallerAfter() public {
+        address strat = Clones.clone(address(new VotingDistributionStrategy()));
+
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-strat");
+        p.overrides.distributionStrategy = strat;
+        CrowdStakeDeployer.Instance memory i = deployer.deploy(p);
+
+        assertEq(i.distributionStrategy, strat, "override used verbatim");
+        assertEq(
+            address(BaseDistributionManager(i.distributionManager).distributionStrategy()),
+            strat,
+            "dm wired to override"
+        );
+
+        VotingDistributionStrategy(strat).initialize(i.token, i.distributionManager, OWNER);
+        assertEq(IOwnable(strat).owner(), OWNER, "caller-init sets owner");
+    }
+
+    function test_RevertWhen_OverrideHasNoCode() public {
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-eoa");
+        p.overrides.recipientRegistry = address(0xEA0); // EOA — no code
+        vm.expectRevert(abi.encodeWithSelector(CrowdStakeDeployer.OverrideHasNoCode.selector, address(0xEA0)));
+        deployer.deploy(p);
+    }
+
+    function test_RevertWhen_StrategyOverrideWithNonProportionalKind() public {
+        address strat = Clones.clone(address(new VotingDistributionStrategy()));
+        CrowdStakeDeployer.Params memory p = _adminParams("ovr-strat-split");
+        p.overrides.distributionStrategy = strat;
+        p.distributionKind = 2; // split
+        vm.expectRevert(CrowdStakeDeployer.StrategyOverrideRequiresProportional.selector);
+        deployer.deploy(p);
+    }
+}
+
+/// @dev Minimal voting-power strategy for override tests.
+contract MockVotingPower {
+    function getCurrentVotingPower(address) external pure returns (uint256) {
+        return 1e18;
+    }
+
+    function getVotingPowerForPeriod(uint256, uint256, address) external pure returns (uint256) {
+        return 1e18;
     }
 }

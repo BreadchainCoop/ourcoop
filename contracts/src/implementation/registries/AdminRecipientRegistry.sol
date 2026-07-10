@@ -69,7 +69,7 @@ contract AdminRecipientRegistry is AbstractRecipientRegistry, CrossChainRegistry
     /// @dev Back-compat overload: familyId = 0 (cross-chain path disabled).
     /// @param admin The address that will have administrative control over the registry
     function initialize(address admin) public initializer {
-        initialize(admin, bytes32(0));
+        _initialize(admin, bytes32(0));
     }
 
     /// @notice Initialize the registry with an admin and a cross-chain family identity
@@ -79,6 +79,12 @@ contract AdminRecipientRegistry is AbstractRecipientRegistry, CrossChainRegistry
     /// @param admin The address that will have administrative control over the registry
     /// @param _familyId Cross-chain family identity (0 = classic chain-bound instance)
     function initialize(address admin, bytes32 _familyId) public initializer {
+        _initialize(admin, _familyId);
+    }
+
+    /// @dev Shared initializer body — the overloads must not nest `initializer` calls
+    ///      (OpenZeppelin v5 reverts InvalidInitialization on reentrant initialization).
+    function _initialize(address admin, bytes32 _familyId) private {
         __Ownable_init(admin);
         __CrossChainRegistryBase_init(_familyId);
     }

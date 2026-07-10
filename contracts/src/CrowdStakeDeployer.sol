@@ -67,6 +67,23 @@ contract CrowdStakeDeployer {
         Split
     }
 
+    /// @notice Optional pre-deployed custom modules; address(0) / empty = deploy the
+    ///         canonical module. Custom modules must implement the corresponding
+    ///         crowdstake interface. Registry/token/cycle overrides are expected to be
+    ///         ALREADY initialized (owned by the caller); votingModule/distributionStrategy
+    ///         overrides are wired by address here and must be initialized by the caller
+    ///         AFTER this deploy (their initializers take the new distribution manager).
+    ///         Wiring the deployer cannot do on caller-owned overrides is left to the
+    ///         caller: cycle.setDistributionManager(dm) and token.setYieldClaimer(dm).
+    struct ModuleOverrides {
+        address recipientRegistry;
+        address token;
+        address cycleModule;
+        address votingModule;
+        address distributionStrategy;
+        address[] votingPowerStrategies;
+    }
+
     struct Params {
         address owner;
         uint256 cycleLength;
@@ -86,6 +103,9 @@ contract CrowdStakeDeployer {
         // Cross-chain family: true = this instance joins the familyIdOf(...) family and its
         // voting module accepts ONLY chain-agnostic castCrossChainVote ballots.
         bool crossChain;
+        // Custom pre-deployed modules (see ModuleOverrides). Incompatible with crossChain:
+        // family instances rely on familyId being threaded through the canonical modules.
+        ModuleOverrides overrides;
     }
 
     struct Instance {
@@ -106,6 +126,14 @@ contract CrowdStakeDeployer {
     error EmptyInitialRecipients();
     error ZeroProposalExpiry();
     error FamilyAlreadyDeployed();
+    /// @notice A module override was provided but has no deployed code.
+    error OverrideHasNoCode(address module);
+    /// @notice A custom distribution strategy only composes with the proportional
+    ///         (single-strategy) manager; equal/split are canonical-only for now.
+    error StrategyOverrideRequiresProportional();
+    /// @notice Module overrides cannot join a cross-chain family: familyId is threaded
+    ///         through the canonical modules' initializers, which overrides skip.
+    error OverridesIncompatibleWithCrossChain();
 
     /// @notice Emitted once a full instance is deployed and handed to its owner.
     event SystemDeployed(address indexed owner, address indexed deployer, bytes32 indexed salt, Instance instance);
@@ -197,17 +225,11 @@ contract CrowdStakeDeployer {
     }
 
     /// @notice Deploy a full, working CrowdStake instance in one transaction.
+    ///         Any slot in p.overrides replaces the canonical module: the deployer wires
+    ///         the given address instead of creating one. Caller-owned overrides keep the
+    ///         wiring the deployer cannot perform (see ModuleOverrides docs).
     function deploy(Params calldata p) external returns (Instance memory inst) {
-        if (p.owner == address(0)) revert ZeroOwner();
-        if (p.cycleLength == 0) revert ZeroCycleLength();
-        if (p.registryKind > uint8(RegistryKind.Voting)) revert InvalidRegistryKind();
-        if (p.distributionKind > uint8(DistributionKind.Split)) revert InvalidDistributionKind();
-        if (p.registryKind == uint8(RegistryKind.Voting)) {
-            // Pre-validate here so a bad config reverts cleanly instead of deep in
-            // the registry's initialize (which would abort the whole one-tx deploy).
-            if (p.initialRecipients.length == 0) revert EmptyInitialRecipients();
-            if (p.proposalExpiry == 0) revert ZeroProposalExpiry();
-        }
+        _validate(p);
 
         bytes32 familyId;
         if (p.crossChain) {
@@ -240,18 +262,25 @@ contract CrowdStakeDeployer {
 
         bytes32 baseSalt = keccak256(abi.encodePacked(p.salt, msg.sender));
         address self = address(this);
+        bool customCycle = p.overrides.cycleModule != address(0);
+        bool customToken = p.overrides.token != address(0);
 
-        // 1. Cycle module (deployer-owned for wiring).
-        inst.cycleModule = FACTORY.create(
-            CYCLE_BEACON,
-            abi.encodeWithSelector(AbstractCycleModule.initialize.selector, p.cycleLength, self),
-            keccak256(abi.encodePacked(baseSalt, "cycle"))
-        );
+        // 1. Cycle module (deployer-owned for wiring), unless overridden.
+        inst.cycleModule = customCycle
+            ? p.overrides.cycleModule
+            : FACTORY.create(
+                CYCLE_BEACON,
+                abi.encodeWithSelector(AbstractCycleModule.initialize.selector, p.cycleLength, self),
+                keccak256(abi.encodePacked(baseSalt, "cycle"))
+            );
 
-        // 2. Recipient registry — admin-controlled or democratic. familyId (0 when !crossChain)
-        //    is threaded in so family instances accept the chain-agnostic governance signatures.
-        //    encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
-        if (p.registryKind == uint8(RegistryKind.Voting)) {
+        // 2. Recipient registry — custom, admin-controlled, or democratic. familyId (0 when
+        //    !crossChain) is threaded in so family instances accept the chain-agnostic
+        //    governance signatures. encodeWithSignature: `initialize` is overloaded, so
+        //    `.selector` is ambiguous.
+        if (p.overrides.recipientRegistry != address(0)) {
+            inst.registry = p.overrides.recipientRegistry;
+        } else if (p.registryKind == uint8(RegistryKind.Voting)) {
             inst.registry = FACTORY.create(
                 VOTING_REGISTRY_BEACON,
                 abi.encodeWithSignature(
@@ -271,55 +300,71 @@ contract CrowdStakeDeployer {
             );
         }
 
-        // 3. Token (deployer-owned so it can set the yield claimer).
-        inst.token = FACTORY.createToken(
-            TOKEN_BEACON,
-            abi.encodeWithSelector(SexyDaiYield.initialize.selector, p.tokenName, p.tokenSymbol, self),
-            keccak256(abi.encodePacked(baseSalt, "token"))
-        );
+        // 3. Token (deployer-owned so it can set the yield claimer), unless overridden.
+        inst.token = customToken
+            ? p.overrides.token
+            : FACTORY.createToken(
+                TOKEN_BEACON,
+                abi.encodeWithSelector(SexyDaiYield.initialize.selector, p.tokenName, p.tokenSymbol, self),
+                keccak256(abi.encodePacked(baseSalt, "token"))
+            );
 
-        // 4. Time-weighted voting power (immutable; deployed directly).
-        inst.votingPowerStrategy =
-            address(new TimeWeightedVotingPower(IVotesCheckpoints(inst.token), AbstractCycleModule(inst.cycleModule)));
+        // 4. Voting power. Custom strategies are used as-is; otherwise deploy the
+        //    canonical time-weighted strategy — but only when the voting module is
+        //    canonical too (a custom module brings its own strategies at its init).
+        if (p.overrides.votingPowerStrategies.length != 0) {
+            inst.votingPowerStrategy = p.overrides.votingPowerStrategies[0];
+        } else if (p.overrides.votingModule == address(0)) {
+            inst.votingPowerStrategy = address(
+                new TimeWeightedVotingPower(IVotesCheckpoints(inst.token), AbstractCycleModule(inst.cycleModule))
+            );
+        }
 
         // 5-6. Distribution manager + strategies (kind-dependent; deployer-owned, wired below).
         if (p.distributionKind == uint8(DistributionKind.Proportional)) {
-            _deployProportional(inst, baseSalt, self, p.owner);
+            _deployProportional(inst, baseSalt, self, p.owner, p.overrides.distributionStrategy);
         } else {
             _deployMulti(inst, baseSalt, self, p.owner, p.distributionKind == uint8(DistributionKind.Split));
         }
 
-        // 7. Voting module (familyId = 0 → classic chain-bound instance).
-        //    encodeWithSignature: `initialize` is overloaded, so `.selector` is ambiguous.
-        IVotingPowerStrategy[] memory vps = new IVotingPowerStrategy[](1);
-        vps[0] = IVotingPowerStrategy(inst.votingPowerStrategy);
-        inst.votingModule = FACTORY.create(
-            VOTING_BEACON,
-            abi.encodeWithSignature(
-                "initialize(uint256,address[],address,address,bytes32)",
-                p.maxVotingPoints,
-                vps,
-                inst.distributionManager,
-                p.owner,
-                familyId
-            ),
-            keccak256(abi.encodePacked(baseSalt, "voting"))
-        );
+        // 7. Voting module, unless overridden (a custom module is wired by address and
+        //    initialized by the caller afterwards — its initializer needs the DM above).
+        //    familyId = 0 → classic chain-bound instance. encodeWithSignature:
+        //    `initialize` is overloaded, so `.selector` is ambiguous.
+        if (p.overrides.votingModule != address(0)) {
+            inst.votingModule = p.overrides.votingModule;
+        } else {
+            inst.votingModule = FACTORY.create(
+                VOTING_BEACON,
+                abi.encodeWithSignature(
+                    "initialize(uint256,address[],address,address,bytes32)",
+                    p.maxVotingPoints,
+                    _votingPowerSet(p, inst),
+                    inst.distributionManager,
+                    p.owner,
+                    familyId
+                ),
+                keccak256(abi.encodePacked(baseSalt, "voting"))
+            );
+        }
 
         // Wire shared references + authorise the manager as the token's yield claimer.
+        // Caller-owned overrides are skipped: the deployer has no privileges on them,
+        // so cycle.setDistributionManager(dm) / token.setYieldClaimer(dm) stay with the caller.
         AbstractDistributionManager(inst.distributionManager).setVotingModule(inst.votingModule);
-        AbstractCycleModule(inst.cycleModule).setDistributionManager(inst.distributionManager);
-        AbstractToken(inst.token).setYieldClaimer(inst.distributionManager);
+        if (!customCycle) AbstractCycleModule(inst.cycleModule).setDistributionManager(inst.distributionManager);
+        if (!customToken) AbstractToken(inst.token).setYieldClaimer(inst.distributionManager);
 
         // Seed instance artwork on the distribution manager while still owner-of-record.
         if (bytes(p.tokenImageURI).length != 0 || bytes(p.bannerImageURI).length != 0) {
             AbstractDistributionManager(inst.distributionManager).setInstanceMetadata(p.tokenImageURI, p.bannerImageURI);
         }
 
-        // Hand the temporarily-owned contracts to the final owner.
-        AbstractToken(inst.token).transferOwnership(p.owner);
+        // Hand the temporarily-owned contracts to the final owner (overrides never
+        // belonged to the deployer, so there is nothing to hand over for them).
+        if (!customToken) AbstractToken(inst.token).transferOwnership(p.owner);
         AbstractDistributionManager(inst.distributionManager).transferOwnership(p.owner);
-        AbstractCycleModule(inst.cycleModule).transferOwnership(p.owner);
+        if (!customCycle) AbstractCycleModule(inst.cycleModule).transferOwnership(p.owner);
 
         // Record the family sibling only after full wiring, so a resolved instance is usable.
         if (p.crossChain) {
@@ -330,10 +375,86 @@ contract CrowdStakeDeployer {
         emit SystemDeployed(p.owner, msg.sender, p.salt, inst);
     }
 
+    /// @dev Parameter validation, pulled out of deploy() for stack room. Overridden
+    ///      slots relax the checks their canonical params would need (cycleLength,
+    ///      democratic config) and must point at deployed code.
+    function _validate(Params calldata p) private view {
+        if (p.owner == address(0)) revert ZeroOwner();
+        if (p.registryKind > uint8(RegistryKind.Voting)) revert InvalidRegistryKind();
+        if (p.distributionKind > uint8(DistributionKind.Split)) revert InvalidDistributionKind();
+        if (p.overrides.cycleModule == address(0) && p.cycleLength == 0) revert ZeroCycleLength();
+        if (p.overrides.recipientRegistry == address(0) && p.registryKind == uint8(RegistryKind.Voting)) {
+            // Pre-validate here so a bad config reverts cleanly instead of deep in
+            // the registry's initialize (which would abort the whole one-tx deploy).
+            if (p.initialRecipients.length == 0) revert EmptyInitialRecipients();
+            if (p.proposalExpiry == 0) revert ZeroProposalExpiry();
+        }
+        // A custom strategy is a single-strategy wiring; the multi-manager kinds
+        // (equal/split) compose canonical strategies only for now.
+        if (
+            p.overrides.distributionStrategy != address(0) && p.distributionKind != uint8(DistributionKind.Proportional)
+        ) {
+            revert StrategyOverrideRequiresProportional();
+        }
+        // Families thread familyId through the canonical modules' initializers, which
+        // overridden modules never receive — the combination would silently break
+        // sign-once cross-chain governance, so reject it outright.
+        if (p.crossChain && _hasAnyOverride(p.overrides)) revert OverridesIncompatibleWithCrossChain();
+        _requireCode(p.overrides.recipientRegistry);
+        _requireCode(p.overrides.token);
+        _requireCode(p.overrides.cycleModule);
+        _requireCode(p.overrides.votingModule);
+        _requireCode(p.overrides.distributionStrategy);
+        for (uint256 i = 0; i < p.overrides.votingPowerStrategies.length; i++) {
+            address s = p.overrides.votingPowerStrategies[i];
+            if (s == address(0) || s.code.length == 0) revert OverrideHasNoCode(s);
+        }
+    }
+
+    /// @dev Whether any override slot is filled (used to gate crossChain).
+    function _hasAnyOverride(ModuleOverrides calldata o) private pure returns (bool) {
+        return o.recipientRegistry != address(0) || o.token != address(0) || o.cycleModule != address(0)
+            || o.votingModule != address(0) || o.distributionStrategy != address(0)
+            || o.votingPowerStrategies.length != 0;
+    }
+
+    /// @dev Overrides must be live contracts — a codeless override would deploy a
+    ///      wired-but-dead instance.
+    function _requireCode(address module) private view {
+        if (module != address(0) && module.code.length == 0) revert OverrideHasNoCode(module);
+    }
+
+    /// @dev The strategy set for the canonical voting module: the override array when
+    ///      provided, else the single canonical time-weighted strategy deployed above.
+    function _votingPowerSet(Params calldata p, Instance memory inst)
+        private
+        pure
+        returns (IVotingPowerStrategy[] memory vps)
+    {
+        uint256 n = p.overrides.votingPowerStrategies.length;
+        if (n == 0) {
+            vps = new IVotingPowerStrategy[](1);
+            vps[0] = IVotingPowerStrategy(inst.votingPowerStrategy);
+        } else {
+            vps = new IVotingPowerStrategy[](n);
+            for (uint256 i = 0; i < n; i++) {
+                vps[i] = IVotingPowerStrategy(p.overrides.votingPowerStrategies[i]);
+            }
+        }
+    }
+
     /// @dev Proportional: BaseDistributionManager (single strategy) + VotingDistributionStrategy.
     ///      The manager is created with a placeholder strategy, then wired via
     ///      setDistributionStrategy once the strategy (which references the manager) exists.
-    function _deployProportional(Instance memory inst, bytes32 baseSalt, address self, address owner) private {
+    ///      A custom strategy override is wired by address instead — its initializer takes
+    ///      this manager's address, so the caller initializes it after this deploy.
+    function _deployProportional(
+        Instance memory inst,
+        bytes32 baseSalt,
+        address self,
+        address owner,
+        address strategyOverride
+    ) private {
         inst.distributionManager = FACTORY.create(
             DIST_MANAGER_BEACON,
             abi.encodeWithSelector(
@@ -348,13 +469,15 @@ contract CrowdStakeDeployer {
             keccak256(abi.encodePacked(baseSalt, "dist-manager"))
         );
 
-        inst.distributionStrategy = FACTORY.create(
-            STRATEGY_BEACON,
-            abi.encodeWithSelector(
-                VotingDistributionStrategy.initialize.selector, inst.token, inst.distributionManager, owner
-            ),
-            keccak256(abi.encodePacked(baseSalt, "strategy"))
-        );
+        inst.distributionStrategy = strategyOverride != address(0)
+            ? strategyOverride
+            : FACTORY.create(
+                STRATEGY_BEACON,
+                abi.encodeWithSelector(
+                    VotingDistributionStrategy.initialize.selector, inst.token, inst.distributionManager, owner
+                ),
+                keccak256(abi.encodePacked(baseSalt, "strategy"))
+            );
 
         BaseDistributionManager(inst.distributionManager).setDistributionStrategy(inst.distributionStrategy);
     }

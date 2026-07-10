@@ -1,7 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { decodeEventLog, type Address, type Hex, type Log } from "viem";
+import {
+  decodeEventLog,
+  zeroAddress,
+  type Address,
+  type Hex,
+  type Log,
+} from "viem";
 import {
   useChainId,
   useWaitForTransactionReceipt,
@@ -30,6 +36,19 @@ export interface DeployParams {
   bannerImageURI?: string;
   // Multi-chain family instance (see lib/families.ts). Default false = classic.
   crossChain?: boolean;
+  // Optional pre-deployed custom modules; unset slots deploy canonical.
+  // Incompatible with crossChain (the deployer reverts on the combination).
+  overrides?: ModuleOverrides;
+}
+
+/** Pre-deployed custom module addresses; zero/empty = canonical. */
+export interface ModuleOverrides {
+  recipientRegistry?: Address;
+  token?: Address;
+  cycleModule?: Address;
+  votingModule?: Address;
+  distributionStrategy?: Address;
+  votingPowerStrategies?: Address[];
 }
 
 /** Decode the deployed instance out of a receipt's SystemDeployed event. */
@@ -131,6 +150,15 @@ export function useDeployInstance() {
             tokenImageURI: p.tokenImageURI ?? "",
             bannerImageURI: p.bannerImageURI ?? "",
             crossChain: p.crossChain ?? false,
+            overrides: {
+              recipientRegistry: p.overrides?.recipientRegistry ?? zeroAddress,
+              token: p.overrides?.token ?? zeroAddress,
+              cycleModule: p.overrides?.cycleModule ?? zeroAddress,
+              votingModule: p.overrides?.votingModule ?? zeroAddress,
+              distributionStrategy:
+                p.overrides?.distributionStrategy ?? zeroAddress,
+              votingPowerStrategies: p.overrides?.votingPowerStrategies ?? [],
+            },
           },
         ],
       });
