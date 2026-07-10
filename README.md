@@ -50,11 +50,20 @@ The cooperative's own contracts live in
   each cycle.
 - **Membership voting power** — voting weight comes from membership, not stake
   size.
+- **Withdrawals** — the four cooperative funds (Reserve, Education, Solidarity,
+  Production) with one-member-one-vote withdrawal proposals.
 
-They are deployed on Gnosis and wired through the deploy wizard's
+## The cooperative app
+
+**`/coop/`** is the cooperative's governance interface, connected to the live
+Sepolia deployment (funds, project proposals, 100-point ballots, funding
+rounds, withdrawal votes, on-chain activity log). Anyone can browse read-only;
+acting requires a member wallet (MetaMask on Sepolia) — the page never holds a
+key.
+
+The Gnosis module set is deployed and wired through the deploy wizard's
 **"Custom modules"** section. The complete click-by-click guide is the
-[custom-modules runbook](./docs/runbook.html) (live at `/docs/runbook.html`),
-and there is a guided demo at `/demo/`.
+[custom-modules runbook](./docs/runbook.html) (live at `/docs/runbook.html`).
 
 ## Every instance gets its own page
 

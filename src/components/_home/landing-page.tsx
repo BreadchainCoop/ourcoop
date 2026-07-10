@@ -14,7 +14,6 @@ import {
   ArrowsClockwise,
   Coins,
   PaintBrush,
-  Play,
   Wrench,
 } from "@phosphor-icons/react/dist/ssr";
 import { AsteriskMark, OurCoopLogo } from "@/components/ourcoop-logo";
@@ -27,7 +26,7 @@ import { YieldSliceExplainer } from "@/components/_home/yield-slice-explainer";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 const DOCS_URL = "/docs"; // in-app documentation & walkthroughs
-const DEMO_URL = `${BASE}/demo/`; // static guided demo (not a Next route)
+const COOP_URL = `${BASE}/coop/`; // the cooperative governance app (live on-chain, static page)
 const RUNBOOK_URL = `${BASE}/docs/runbook.html`; // static operator runbook
 const GITHUB_URL = "https://github.com/BreadchainCoop/crowdstake.fun";
 
@@ -66,7 +65,6 @@ function SiteNav() {
           <NavLink href="#concepts">How we decide</NavLink>
           <NavLink href="#how-it-works">How it works</NavLink>
           <NavLink href="#get-started">Get started</NavLink>
-          <NavLink href={DEMO_URL}>Demo</NavLink>
         </div>
         <div className="flex items-center gap-3">
           <Button
@@ -78,7 +76,7 @@ function SiteNav() {
           >
             Documentation
           </Button>
-          <Button app="fund" variant="primary" size="sm" as={Link} href="/app">
+          <Button app="fund" variant="primary" size="sm" as="a" href={COOP_URL}>
             Launch App
           </Button>
         </div>
@@ -164,20 +162,11 @@ function Hero() {
           <Button
             app="fund"
             variant="primary"
-            as={Link}
-            href="/app"
+            as="a"
+            href={COOP_URL}
             rightIcon={<ArrowRight weight="bold" />}
           >
             Enter the app
-          </Button>
-          <Button
-            app="fund"
-            variant="light"
-            as="a"
-            href={DEMO_URL}
-            rightIcon={<Play weight="fill" />}
-          >
-            Guided demo
           </Button>
           <a
             href={RUNBOOK_URL}
@@ -191,7 +180,8 @@ function Hero() {
         <div className="mt-12 flex items-center gap-2.5">
           <ArrowRight size={18} weight="bold" className="text-orange-0" />
           <span className="text-sm font-semibold text-white/80">
-            Gnosis Chain · cUSD over sDAI yield
+            Cooperative governance live on-chain · funds · 100-point ballots ·
+            withdrawals
           </span>
         </div>
       </div>
@@ -443,7 +433,7 @@ function GetStarted() {
             timeline="Minutes"
             technical="None — wizard-guided"
           >
-            <Button app="fund" variant="primary" as={Link} href="/app">
+            <Button app="fund" variant="primary" as={Link} href="/app/deploy">
               Open the deploy wizard
             </Button>
           </DeployCard>
@@ -543,11 +533,8 @@ function CtaBand() {
           modules.
         </Body>
         <div className="mt-8 flex flex-wrap justify-center gap-4">
-          <Button app="fund" variant="light" as={Link} href="/app">
+          <Button app="fund" variant="light" as="a" href={COOP_URL}>
             Enter the app
-          </Button>
-          <Button app="fund" variant="light" as="a" href={DEMO_URL}>
-            Guided demo
           </Button>
         </div>
       </div>
@@ -558,8 +545,9 @@ function CtaBand() {
 /* -------------------------------- Footer --------------------------------- */
 
 const FOOTER_LINKS: { label: string; href: string; internal?: boolean }[] = [
+  { label: "Cooperative app", href: `${BASE}/coop/` },
+  { label: "Protocol dapp", href: "/app", internal: true },
   { label: "Documentation", href: DOCS_URL, internal: true },
-  { label: "Demo", href: DEMO_URL },
   { label: "Runbook", href: RUNBOOK_URL },
   { label: "Upstream protocol", href: GITHUB_URL },
 ];
