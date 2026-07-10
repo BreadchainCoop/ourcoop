@@ -6,6 +6,93 @@
 /* Keep @breadcoop/ui's prebuilt classes from being purged. */
 @source "../../node_modules/@breadcoop/ui";
 
+/* ================= O.U.R.COOP brand overlay =================
+   The Shared Visions identity: signature purple, black ink, paper white,
+   a Helvetica-style grotesque (Archivo), and the ✳ asterisk mark. Every
+   design-system token below re-points the @breadcoop/ui palette, so all
+   existing bg-core-orange / text-primary-jade / paper-* utilities pick the
+   cooperative's colors up without touching component markup. */
+
+/* Archivo variable font (100–900), self-hosted. latin + latin-ext (the
+   cooperative publishes in English and Serbian/Croatian). */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/archivo-latin.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/archivo-latin-ext.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@theme {
+  /* Primary: Shared Visions purple (posters, logo lockup). */
+  --color-core-orange: #7845dc;
+  --color-primary-orange: #7845dc;
+  --color-orange-0: #c9b4f4; /* light tint */
+  --color-orange-1: #6335c4; /* hover */
+  --color-orange-2: #4f28a6; /* active */
+
+  /* Secondary accent: deep violet (was jade). */
+  --color-primary-jade: #4a3591;
+  --color-jade-0: #a99bd6;
+  --color-jade-1: #7a6bb8;
+  --color-jade-2: #37276e;
+
+  /* Info blue → violet-leaning blue. */
+  --color-primary-blue: #4c42c9;
+  --color-blue-0: #b9b3ea;
+  --color-blue-1: #6f66d8;
+  --color-blue-2: #37309c;
+
+  /* Paper: white with a faint lavender cast (poster paper). */
+  --color-paper-main: #f7f5fc;
+  --color-paper-0: #fdfcff;
+  --color-paper-1: #efecf8;
+  --color-paper-2: #e5e0f3;
+
+  /* Ink & greys with a purple cast. */
+  --color-surface-ink: #17121f;
+  --color-text-standard: #17121f;
+  --color-surface-grey: #837d91;
+  --color-surface-grey-2: #5a5468;
+  --color-surface-brown: #443659;
+  --color-surface-brown-1: #2a2038;
+
+  /* Fonts: one bold grotesque for display and body, Helvetica fallbacks. */
+  --font-breadDisplay:
+    "Archivo", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui,
+    sans-serif;
+  --font-breadBody:
+    "Archivo", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui,
+    sans-serif;
+}
+
+/* theme.css wires its @theme fonts through :root vars — repoint those too. */
+:root {
+  --font-breadDisplay:
+    "Archivo", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui,
+    sans-serif;
+  --font-breadBody:
+    "Archivo", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui,
+    sans-serif;
+}
+
 /* Light app — force the paper background (unlayered so it beats the design
    system's dark default / prefers-color-scheme), and offset anchor jumps
    so section headings don't hide under the sticky nav. */
@@ -15,7 +102,7 @@ html {
 }
 html,
 body {
-  background-color: #f6f3eb; /* paper-main */
+  background-color: #f7f5fc; /* paper-main */
 }
 :target {
   scroll-margin-top: 5rem;

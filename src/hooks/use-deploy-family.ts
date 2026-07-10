@@ -284,6 +284,16 @@ export function useDeployFamily(config: FamilyDeployConfig | null) {
               tokenImageURI: cfg.tokenImageURI,
               bannerImageURI: cfg.bannerImageURI,
               crossChain: true,
+              // Families never use module overrides (the deployer reverts on
+              // the combination) — send the empty tuple.
+              overrides: {
+                recipientRegistry: zeroAddress,
+                token: zeroAddress,
+                cycleModule: zeroAddress,
+                votingModule: zeroAddress,
+                distributionStrategy: zeroAddress,
+                votingPowerStrategies: [],
+              },
             },
           ],
         });
