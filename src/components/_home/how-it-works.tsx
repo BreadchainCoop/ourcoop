@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 /**
  * HowItWorks
  * ----------
- * The four-beat story of Crowdstaking — pool → earn → vote → fund — with a
+ * The four-beat story of O.U.R.COOP — pool → earn → vote → fund — with a
  * bespoke, purely-CSS-animated illustration paired with every step instead of
  * plain text. The animations loop gently and are disabled automatically under
  * `prefers-reduced-motion` (see the `.hiw-*` rules in globals.css); each visual
@@ -32,9 +32,9 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    title: "Community pools assets",
-    body: "Members deposit funds to the shared community pool in your own branded interface.",
-    caption: "Members → community pool",
+    title: "Members pool assets",
+    body: "Members stake into the cooperative's shared pool and receive cUSD 1:1 — the deposit stays theirs.",
+    caption: "Members → cooperative pool",
     Visual: PoolVisual,
   },
   {
@@ -44,15 +44,15 @@ const STEPS: Step[] = [
     Visual: YieldVisual,
   },
   {
-    title: "Community decides on funding",
-    body: "Interest is allocated to your community's shared goal.",
-    caption: "Weighted votes split the yield",
+    title: "Members vote with 100-point ballots",
+    body: "Each member spreads 100 points across project proposals — one member, one ballot, whatever their stake.",
+    caption: "100-point ballots split the yield",
     Visual: VoteVisual,
   },
   {
     title: "Projects get funded",
-    body: "Projects receive funding while members retain their original principal amount.",
-    caption: "Yield → recipients · principal returns 1:1",
+    body: "The round's Art Fund pays the winning projects while members retain their original principal.",
+    caption: "Yield → projects · principal returns 1:1",
     Visual: FundVisual,
   },
 ];
@@ -62,7 +62,7 @@ export function HowItWorks() {
     <section id="how-it-works" className="py-20">
       <div className="section-container">
         <Heading2 className="text-text-standard text-center">
-          Fundraising for free: from shared funds to shared futures
+          Funding art for free: from shared savings to shared visions
         </Heading2>
 
         <ol className="mx-auto mt-14 max-w-5xl space-y-12 sm:space-y-16">
@@ -166,7 +166,7 @@ function PoolVisual() {
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <Coins size={22} weight="duotone" className="text-primary-jade" />
           <span className="text-primary-jade mt-1 text-xs font-semibold">
-            Community pool
+            Cooperative pool
           </span>
         </div>
       </div>
@@ -204,15 +204,15 @@ function YieldVisual() {
 
 function VoteVisual() {
   const rows = [
-    { label: "Recipient A", w: "82%", delay: "0s" },
-    { label: "Recipient B", w: "56%", delay: "0.35s" },
-    { label: "Recipient C", w: "38%", delay: "0.7s" },
+    { label: "Community mural", w: "82%", delay: "0s" },
+    { label: "Zine press", w: "56%", delay: "0.35s" },
+    { label: "Artist residency", w: "38%", delay: "0.7s" },
   ];
   return (
     <div className="flex w-full max-w-[16rem] flex-col gap-3 px-5 pb-4">
       <div className="text-surface-grey-2 flex items-center gap-1.5 text-xs font-semibold">
         <Sliders size={15} weight="bold" className="text-core-orange" />
-        Allocate the yield
+        Spread your 100 points
       </div>
       {rows.map((r) => (
         <div key={r.label}>

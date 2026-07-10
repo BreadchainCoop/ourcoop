@@ -65,7 +65,7 @@ export function InstanceHeader() {
         <InstanceTokenBadge className="h-14 w-14" />
         <div className="min-w-0">
           <Heading3 className="text-text-standard truncate">
-            {name || symbol || "Crowdstaking instance"}
+            {name || symbol || "O.U.R.COOP instance"}
           </Heading3>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="text-surface-grey-2 font-mono text-sm">

@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>O.U.R.COOP integration — step by step</title>
+<style>
+  /* Archivo variable font (100–900), self-hosted. latin + latin-ext (the
+     cooperative publishes in English and Serbian/Croatian). */
+  @font-face {
+    font-family: "Archivo";
+    font-style: normal;
+    font-weight: 100 900;
+    font-stretch: 100%;
+    font-display: swap;
+    src: url("../fonts/archivo-latin.woff2") format("woff2");
+    unicode-range:
+      U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+      U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+      U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "Archivo";
+    font-style: normal;
+    font-weight: 100 900;
+    font-stretch: 100%;
+    font-display: swap;
+    src: url("../fonts/archivo-latin-ext.woff2") format("woff2");
+    unicode-range:
+      U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+      U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+      U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  :root{
+    --purple:#7845DC; --purple-hover:#6335C4; --violet:#4A3591; --lilac:#C9B4F4;
+    --ink:#17121F; --paper:#F7F5FC; --paper2:#EDE8F8;
+    --grey:#6C6480; --green:#2e9e5b; --red:#D1493C; --line:#E0D8F1;
+    --code-bg:#1D1727; --code-ink:#F2EEF9; --code-key:#C9B4F4; --code-str:#9FD08A; --code-dim:#8A80A0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Archivo","Helvetica Neue",Helvetica,Arial,sans-serif;
+    background:var(--paper); color:var(--ink); overflow:hidden;
+  }
+  #progress{position:fixed;top:0;left:0;height:4px;background:var(--purple);z-index:50;transition:width .25s ease}
+  .deck{height:100vh;width:100vw;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;flex-direction:column;
+    padding:5vh 7vw 8vh;overflow-y:auto;animation:fade .35s ease;
+  }
+  .slide.active{display:flex}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .kicker{color:var(--purple);font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:13px;margin-bottom:10px}
+  .kicker::before{content:"✳ "}
+  h1{font-size:clamp(30px,4.6vw,54px);line-height:1.05;margin:0 0 18px;font-weight:850;letter-spacing:-.02em}
+  h2{font-size:clamp(24px,3.2vw,38px);line-height:1.1;margin:0 0 16px;font-weight:800;letter-spacing:-.01em}
+  p,li{font-size:clamp(15px,1.55vw,19px);line-height:1.55;color:#2C2438}
+  .lead{font-size:clamp(17px,1.9vw,22px);color:var(--grey);max-width:60ch}
+  ul{margin:.4em 0 .4em;padding-left:1.2em}
+  li{margin:.35em 0}
+  b,strong{color:var(--ink)}
+  .pill{display:inline-block;background:var(--paper2);border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:13px;font-weight:700;color:var(--grey);margin:0 6px 6px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:12px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .card h3{margin:0 0 8px;font-size:17px}
+  .card .n{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--purple);color:#fff;font-weight:800;font-size:15px;margin-bottom:10px}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.92em;background:var(--paper2);padding:1px 6px;border-radius:6px;color:var(--violet)}
+  pre{position:relative;background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:18px 20px;overflow-x:auto;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:clamp(12px,1.15vw,14.5px);line-height:1.6;margin:14px 0}
+  pre code{background:none;padding:0;color:inherit;font-size:inherit}
+  .cmt{color:var(--code-dim)}
+  .k{color:var(--code-key)}
+  .s{color:var(--code-str)}
+  .copy{position:absolute;top:10px;right:10px;background:#352B47;color:#E5DDF5;border:none;border-radius:7px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer;opacity:.75;transition:.15s}
+  .copy:hover{opacity:1;background:var(--purple);color:#fff}
+  .addr{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:.86em;word-break:break-all}
+  .note{border-left:3px solid var(--purple);background:#F1EBFC;padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0;font-size:15px}
+  .warn{border-left:3px solid var(--red);background:#FBECEA}
+  .ok{border-left:3px solid var(--green);background:#EDF7F0}
+  .tag{font-size:12px;font-weight:800;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.04em}
+  .tag.done{background:#dff3e6;color:#1d7a45}
+  .tag.you{background:#E7DCFA;color:#4A3591}
+  table{border-collapse:collapse;width:100%;margin-top:10px;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--grey);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  td .addr{font-size:12.5px}
+  .foot{position:fixed;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:14px 24px;background:linear-gradient(transparent,var(--paper) 40%);z-index:40}
+  .nav{display:flex;gap:8px}
+  .btn{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 16px;font-weight:700;font-size:14px;cursor:pointer;color:var(--ink);font-family:inherit}
+  .btn:hover{border-color:var(--purple);color:var(--purple)}
+  .btn.primary{background:var(--purple);color:#fff;border-color:var(--purple)}
+  .btn.primary:hover{background:var(--purple-hover);border-color:var(--purple-hover);color:#fff}
+  .counter{font-size:13px;color:var(--grey);font-weight:700;font-variant-numeric:tabular-nums}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px}
+  .flow .step{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 14px;font-weight:700;font-size:14px}
+  .flow .arr{color:var(--purple);font-weight:800;font-size:20px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:820px){.two{grid-template-columns:1fr}}
+  .muted{color:var(--grey)}
+  .hint{font-size:13px;color:var(--grey);margin-top:6px}
+  .asterisks{color:var(--purple);letter-spacing:.4em;font-size:17px;margin-top:26px;user-select:none}
+  a{color:var(--purple);font-weight:700}
+  a:hover{color:var(--purple-hover)}
+  kbd{background:#fff;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:12px;font-family:inherit;font-weight:700}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="deck" id="deck">
+
+  <!-- 1 -->
+  <section class="slide active">
+    <div class="kicker">O.U.R.COOP · custom-implementation deploys</div>
+    <h1>Deploy &amp; test the O.U.R.COOP<br/>artist cooperative</h1>
+    <p class="lead">A complete, click-by-click runbook: ship the code, run the creation wizard against the cooperative's live modules, finish the wiring, seed the cooperative, and drive a full vote&nbsp;→&nbsp;yield&nbsp;→&nbsp;distribution cycle — on Gnosis mainnet. (The modules were deployed under the cooperative's former working name, COVA — the token is cUSD, “COVA USD”.)</p>
+    <div style="margin-top:22px">
+      <span class="pill">Gnosis · chain 100</span>
+      <span class="pill">~20 min hands-on</span>
+      <span class="pill">Foundry + a browser wallet</span>
+    </div>
+    <div class="asterisks">✳✳✳✳✳✳</div>
+    <p class="hint" style="margin-top:20px">Use <kbd>→</kbd> / <kbd>Space</kbd> to advance, <kbd>←</kbd> to go back. Every code block has a <b>Copy</b> button.</p>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <div class="kicker">The idea in one picture</div>
+    <h2>Custom modules, canonical wiring</h2>
+    <p class="lead">O.U.R.COOP is built from custom implementations of the standard crowdstake interfaces. You deploy those modules once, then the <b>same creation wizard</b> that builds a normal instance wires a distribution manager + cycle module around them.</p>
+    <div class="flow">
+      <span class="step">Deploy the 5 COVA modules</span>
+      <span class="arr">→</span>
+      <span class="step">Paste addresses into the wizard</span>
+      <span class="arr">→</span>
+      <span class="step">Wizard deploys DM + cycle &amp; wires all of it</span>
+      <span class="arr">→</span>
+      <span class="step">Finish 3 follow-ups</span>
+      <span class="arr">→</span>
+      <span class="step">Seed &amp; use</span>
+    </div>
+    <div class="note">The wizard's <b>“Custom modules (advanced)”</b> section has one field per interface slot — registry, token, cycle, voting module, distribution strategy, and a voting-power-strategies list. Empty fields deploy the canonical module; filled fields use yours.</div>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide">
+    <div class="kicker">Where things stand</div>
+    <h2>Already done vs. what you'll do</h2>
+    <div class="two">
+      <div>
+        <p><span class="tag done">done</span> &nbsp;in this repo / on-chain</p>
+        <ul>
+          <li>COVA contracts ported &amp; interface-aligned (<code>maxPoints()</code>, <code>voteWithData()</code>)</li>
+          <li><code>CrowdStakeDeployer</code> extended with per-slot <code>ModuleOverrides</code></li>
+          <li>Wizard UI: custom-module fields + post-deploy checklist</li>
+          <li>The <b>5 COVA modules are deployed on Gnosis</b> (real WXDAI→sDAI)</li>
+          <li>Verified end-to-end on a Gnosis fork — exact worked-example allocation</li>
+          <li>All of it ships <b>in this repo</b> — the BreadchainCoop <code>ourcoop</code> fork of crowdstake.fun. No branch to merge.</li>
+        </ul>
+      </div>
+      <div>
+        <p><span class="tag you">you</span> &nbsp;to make it live &amp; test</p>
+        <ul>
+          <li>Push to <code>main</code> → the frontend auto-deploys</li>
+          <li>Run the <code>contracts-deploy</code> workflow → publishes the new deployer to the address manifest</li>
+          <li>Open the wizard, paste the 5 addresses, deploy</li>
+          <li>Do 3 follow-up txs, seed members + projects</li>
+          <li>Deposit → vote → distribute, and watch it pay out</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide">
+    <div class="kicker">Before you start</div>
+    <h2>Prerequisites</h2>
+    <div class="grid">
+      <div class="card"><span class="n">1</span><h3>Foundry</h3><p class="muted">For the <code>cast</code> commands (and to re-deploy modules if you ever need to).</p></div>
+      <div class="card"><span class="n">2</span><h3>A funded Gnosis key</h3><p class="muted">The <b>coordinator</b> — it owns the COVA modules. You've been using <span class="addr">0x6636…D9F0</span>. Keep a little xDAI in it.</p></div>
+      <div class="card"><span class="n">3</span><h3>A browser wallet</h3><p class="muted">MetaMask/Rabbit on Gnosis, connected as the coordinator, to drive the wizard.</p></div>
+      <div class="card"><span class="n">4</span><h3>Some xDAI to stake</h3><p class="muted">A few xDAI to wrap → deposit as the cooperative's principal (backs the cUSD you'll distribute).</p></div>
+    </div>
+    <div class="note ok">Everything below targets <b>Gnosis mainnet</b>. It's cheap (sub-cent gas) and the yield is real sDAI — the honest end-to-end test.</div>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide">
+    <div class="kicker">Phase 0 · ship the code</div>
+    <h2>Push, then let CI place the deployer</h2>
+    <p class="lead">The wizard needs the <b>overrides-capable</b> <code>CrowdStakeDeployer</code> on-chain. That's fully pipeline-managed — no manual address editing.</p>
+    <ul>
+      <li><b>Nothing to merge</b> — this work ships in this repo (the BreadchainCoop <code>ourcoop</code> fork). A push to <code>main</code> touching <code>src/**</code> auto-triggers <code>deploy-frontend.yml</code> → the wizard UI ships to GitHub Pages.</li>
+      <li><b>Run the contracts workflow.</b> Actions → <b>Deploy contracts (multi-chain)</b> → target <code>DeployCrowdStakeDeployer</code>, chain <code>gnosis</code>.</li>
+      <li>Its publish step writes the new deployer address into the rolling <code>contract-addresses</code> release.</li>
+      <li><code>remote-addresses.ts</code> hydrates <code>CHAINS[100].deployer</code> from that release <b>at runtime</b> — the live wizard picks it up on the next page load. No rebuild for the address swap.</li>
+    </ul>
+    <div class="note">You can also deploy it locally with the same script if you'd rather not wait for CI:</div>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># from contracts/</span>
+PRIVATE_KEY=$PK forge script script/DeployCrowdStakeDeployer.s.sol \
+  --rpc-url https://rpc.gnosischain.com --broadcast --slow -vvvv</code></pre>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide">
+    <div class="kicker">Phase 1 · the COVA modules</div>
+    <h2>Already deployed on Gnosis</h2>
+    <p class="lead">You ran <code>script/DeployCovaModules.s.sol</code> — these are the live addresses to paste into the wizard. All five are verified in the exact expected state.</p>
+    <table>
+      <tr><th>Wizard field</th><th>Address</th><th>State</th></tr>
+      <tr><td>Recipient registry</td><td class="addr">0xD6f51fD6B8576dcDE219E8406e8492D391febAf9</td><td>init · owner=coord</td></tr>
+      <tr><td>Token (cUSD)</td><td class="addr">0xC0e2dA5d4F3Bd607D63355C8B85CA878F59B9836</td><td>init · WXDAI→sDAI</td></tr>
+      <tr><td>Voting module</td><td class="addr">0x7023Db7E686C7eaf26B533ACf17b2f4709EB2a5f</td><td><b>uninitialized</b></td></tr>
+      <tr><td>Distribution strategy</td><td class="addr">0x34871c6514d364c7c0e524E695e5339dae4646b4</td><td><b>uninitialized</b></td></tr>
+      <tr><td>Voting-power strategy[0]</td><td class="addr">0x05233074b7c480e29bFE0D266AA411aB29420E8B</td><td>owner=coord</td></tr>
+    </table>
+    <div class="note">The voting module &amp; strategy are <b>intentionally uninitialized</b> — their initializers take the distribution-manager address that only exists <i>after</i> the wizard deploy. That's follow-ups #2 and #3.</div>
+    <p class="hint">Need a fresh set (new cooperative)? Re-run <code>PRIVATE_KEY=$PK forge script script/DeployCovaModules.s.sol --rpc-url $RPC --broadcast</code> — it prints a new address block + these same follow-up commands.</p>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <div class="kicker">Phase 1 · set up your shell</div>
+    <h2>Export everything once</h2>
+    <p class="lead">Paste this into your terminal so every later command is clean. (You'll add <code>$DM</code> after the wizard deploy.)</p>
+    <pre><button class="copy">Copy</button><code><span class="k">export</span> RPC=https://rpc.gnosischain.com
+<span class="k">export</span> PK=<span class="s">0x…your-coordinator-key…</span>          <span class="cmt"># owns the modules (0x6636…D9F0)</span>
+<span class="k">export</span> COORD=0x6636A1CCBdf54485067304C1a590DE016DeaD9F0
+
+<span class="cmt"># live COVA modules</span>
+<span class="k">export</span> REG=0xD6f51fD6B8576dcDE219E8406e8492D391febAf9
+<span class="k">export</span> TOK=0xC0e2dA5d4F3Bd607D63355C8B85CA878F59B9836
+<span class="k">export</span> VM=0x7023Db7E686C7eaf26B533ACf17b2f4709EB2a5f
+<span class="k">export</span> STRAT=0x34871c6514d364c7c0e524E695e5339dae4646b4
+<span class="k">export</span> POWER=0x05233074b7c480e29bFE0D266AA411aB29420E8B
+
+<span class="cmt"># Gnosis tokens</span>
+<span class="k">export</span> WXDAI=0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d
+<span class="k">export</span> SDAI=0xaf204776c7245bF4147c2612BF6e5972Ee483701</code></pre>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <div class="kicker">Phase 1 · sanity check</div>
+    <h2>Confirm the modules are ready</h2>
+    <p class="lead">Reads only — no gas. Confirms the two “to-be-initialized” modules really are blank, and the token points at real WXDAI/sDAI.</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># token: COVA USD / cUSD, over WXDAI→sDAI, claimer not yet set</span>
+cast call $TOK <span class="s">'name()(string)'</span>   --rpc-url $RPC
+cast call $TOK <span class="s">'symbol()(string)'</span> --rpc-url $RPC
+cast call $TOK <span class="s">'yieldClaimer()(address)'</span> --rpc-url $RPC   <span class="cmt"># → 0x000…000</span>
+
+<span class="cmt"># voting module + strategy are uninitialized</span>
+cast call $VM    <span class="s">'getVotingPowerStrategies()(address[])'</span> --rpc-url $RPC  <span class="cmt"># → []</span>
+cast call $STRAT <span class="s">'owner()(address)'</span> --rpc-url $RPC                 <span class="cmt"># → 0x000…000</span>
+
+<span class="cmt"># registry initialized, empty</span>
+cast call $REG <span class="s">'getRecipientCount()(uint256)'</span> --rpc-url $RPC  <span class="cmt"># → 0</span></code></pre>
+    <div class="note ok">If those match (empty strategies, zero claimer/owner, count 0), you're clear to run the wizard.</div>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <div class="kicker">Phase 2 · the wizard</div>
+    <h2>Open “Deploy your instance”</h2>
+    <p class="lead">On the live app (once the frontend has shipped), connect your wallet <b>as the coordinator</b> on Gnosis and go to the deploy wizard — from these docs that's <a href="../app/deploy/"><code>../app/deploy/</code></a> (the app's <code>/app/deploy</code> route).</p>
+    <ul>
+      <li>Set a short <b>Cycle length</b> for testing — e.g. <b>2 minutes</b> (~24 blocks at 5s/block). You can bump it later per instance.</li>
+      <li>Leave <b>Owner</b> as you (the coordinator).</li>
+      <li>Expand <b>“Custom modules (advanced).”</b></li>
+    </ul>
+    <div class="note">As soon as you paste an override, the superseded canonical inputs disappear — the registry override hides the governance picker, the token override hides name/symbol, and the strategy override locks yield distribution to “By votes.” That's expected.</div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <div class="kicker">Phase 2 · fill the fields</div>
+    <h2>Paste the five addresses</h2>
+    <div class="grid">
+      <div class="card"><h3>Recipient registry</h3><p class="addr">0xD6f51fD6B8576dcDE219E8406e8492D391febAf9</p></div>
+      <div class="card"><h3>Token</h3><p class="addr">0xC0e2dA5d4F3Bd607D63355C8B85CA878F59B9836</p></div>
+      <div class="card"><h3>Voting module</h3><p class="addr">0x7023Db7E686C7eaf26B533ACf17b2f4709EB2a5f</p></div>
+      <div class="card"><h3>Distribution strategy</h3><p class="addr">0x34871c6514d364c7c0e524E695e5339dae4646b4</p></div>
+      <div class="card"><h3>Voting-power strategies<br/><span class="muted" style="font-weight:400;font-size:13px">(one per line)</span></h3><p class="addr">0x05233074b7c480e29bFE0D266AA411aB29420E8B</p></div>
+      <div class="card"><h3>Cycle module</h3><p class="muted">Leave <b>blank</b> — the wizard deploys the canonical one and wires it for you.</p></div>
+    </div>
+    <div class="note">Then hit <b>Deploy instance</b> and confirm in your wallet. One transaction deploys the distribution manager + cycle module and wires the whole system.</div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide">
+    <div class="kicker">Phase 2 · capture the output</div>
+    <h2>Grab the distribution-manager address</h2>
+    <p class="lead">On the success screen, open <b>“Contract addresses”</b> and copy the <b>Distribution Manager</b>. Everything downstream hangs off it — it's also the instance's shareable id (<code>?i=…&amp;c=100</code>).</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># add it to your shell env</span>
+<span class="k">export</span> DM=<span class="s">0x…distribution-manager-from-the-success-screen…</span></code></pre>
+    <div class="note">The success screen also shows a <b>“Finish wiring your custom modules”</b> checklist — that's your next three actions. The <b>Authorize yield claimer</b> button there does follow-up #1 for you; the other two are quick <code>cast</code> calls.</div>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide">
+    <div class="kicker">Phase 3 · finish wiring</div>
+    <h2>Three follow-ups</h2>
+    <p class="lead">The deployer can't touch your caller-owned modules or initialize contracts that needed the DM address — so you close the loop. Run as the coordinator.</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># 1 · let the manager claim yield from the token</span>
+<span class="cmt">#     (or just click "Authorize yield claimer" on the success screen)</span>
+cast send $TOK <span class="s">'setYieldClaimer(address)'</span> $DM --rpc-url $RPC --private-key $PK
+
+<span class="cmt"># 2 · initialize the Art-Fund strategy (topN = 5)</span>
+cast send $STRAT <span class="s">'initialize(address,address,address,uint256)'</span> \
+  $TOK $DM $COORD 5 --rpc-url $RPC --private-key $PK
+
+<span class="cmt"># 3 · initialize the voting module with the membership strategy</span>
+cast send $VM <span class="s">'initialize(address[],address,address)'</span> \
+  <span class="s">"[$POWER]"</span> $DM $COORD --rpc-url $RPC --private-key $PK</code></pre>
+    <div class="note ok">The canonical cycle module is already wired by the deployer — nothing to do there.</div>
+  </section>
+
+  <!-- 13 -->
+  <section class="slide">
+    <div class="kicker">Phase 3 · verify the wiring</div>
+    <h2>Confirm it's a live, coherent system</h2>
+    <p class="lead">This is exactly the read-set the app uses to resolve an instance. All should now point at your modules.</p>
+    <pre><button class="copy">Copy</button><code>cast call $DM <span class="s">'baseToken()(address)'</span>          --rpc-url $RPC  <span class="cmt"># → $TOK</span>
+cast call $DM <span class="s">'votingModule()(address)'</span>       --rpc-url $RPC  <span class="cmt"># → $VM</span>
+cast call $DM <span class="s">'recipientRegistry()(address)'</span>  --rpc-url $RPC  <span class="cmt"># → $REG</span>
+cast call $DM <span class="s">'distributionStrategy()(address)'</span> --rpc-url $RPC  <span class="cmt"># → $STRAT</span>
+cast call $TOK <span class="s">'yieldClaimer()(address)'</span>       --rpc-url $RPC  <span class="cmt"># → $DM</span>
+cast call $VM  <span class="s">'getVotingPowerStrategies()(address[])'</span> --rpc-url $RPC  <span class="cmt"># → [$POWER]</span></code></pre>
+  </section>
+
+  <!-- 14 -->
+  <section class="slide">
+    <div class="kicker">Phase 4 · seed the cooperative</div>
+    <h2>Add members (one person, one vote)</h2>
+    <p class="lead">Members are the addresses allowed to vote. The coordinator owns the membership contract.</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># pass every member address in one array (include yourself to vote)</span>
+cast send $POWER <span class="s">'addMembers(address[])'</span> \
+  <span class="s">"[$COORD,0xMEMBER_TWO,0xMEMBER_THREE]"</span> \
+  --rpc-url $RPC --private-key $PK
+
+<span class="cmt"># check</span>
+cast call $POWER <span class="s">'getCurrentVotingPower(address)(uint256)'</span> $COORD --rpc-url $RPC <span class="cmt"># → 1000000000000000000 (1e18)</span></code></pre>
+    <div class="hint">Each member returns exactly <code>1e18</code> voting power — equal weight, regardless of holdings.</div>
+  </section>
+
+  <!-- 15 -->
+  <section class="slide">
+    <div class="kicker">Phase 4 · seed the cooperative</div>
+    <h2>Register the art projects</h2>
+    <p class="lead"><code>registerProject(recipient, fullBudget, minViableBudget, title, summary)</code> — then <code>processQueue()</code> to activate them at the cycle boundary. Budgets in cUSD (1e18 = 1).</p>
+    <pre><button class="copy">Copy</button><code>cast send $REG <span class="s">'registerProject(address,uint256,uint256,string,string)'</span> \
+  0xPROJECT_1 5000000000000000000000 2000000000000000000000 <span class="s">"Mural"</span> <span class="s">"Textile-mill mural"</span> \
+  --rpc-url $RPC --private-key $PK
+
+<span class="cmt"># …repeat for each project…</span>
+
+<span class="cmt"># activate the queued projects</span>
+cast send $REG <span class="s">'processQueue()'</span> --rpc-url $RPC --private-key $PK
+cast call $REG <span class="s">'getRecipientCount()(uint256)'</span> --rpc-url $RPC   <span class="cmt"># → number of projects</span></code></pre>
+    <div class="note"><b>Min-viable budget</b> is the floor: if a project's vote-share would fund it below this, it's dropped and its share is redistributed to the projects that clear their floor. That's the O.U.R.COOP allocation rule.</div>
+  </section>
+
+  <!-- 16 -->
+  <section class="slide">
+    <div class="kicker">Phase 5 · put money in</div>
+    <h2>Stake principal &amp; mint cUSD</h2>
+    <p class="lead">Wrap xDAI → WXDAI, approve the token, mint cUSD. The principal is parked in sDAI; the interest it earns is what gets distributed.</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># amount = 100 cUSD here (1e20). Scale as you like.</span>
+<span class="k">export</span> AMT=100000000000000000000
+
+cast send $WXDAI <span class="s">'deposit()'</span> --value $AMT --rpc-url $RPC --private-key $PK       <span class="cmt"># xDAI → WXDAI</span>
+cast send $WXDAI <span class="s">'approve(address,uint256)'</span> $TOK $AMT --rpc-url $RPC --private-key $PK
+cast send $TOK   <span class="s">'mint(address,uint256)'</span>    $COORD $AMT --rpc-url $RPC --private-key $PK
+
+cast call $TOK <span class="s">'balanceOf(address)(uint256)'</span> $COORD --rpc-url $RPC   <span class="cmt"># → your cUSD</span></code></pre>
+    <div class="note warn"><b>Real yield is slow.</b> On mainnet, distributable yield = sDAI growth above principal, which accrues over time. For a quick functional test, distribution only needs yield ≥ (number of projects) wei — so even a short wait works; the payouts will just be small. For big, exact numbers, stake more or wait longer.</div>
+  </section>
+
+  <!-- 17 -->
+  <section class="slide">
+    <div class="kicker">Phase 5 · govern</div>
+    <h2>Cast votes</h2>
+    <p class="lead">Each member allocates a 100-point ballot across the projects (index-aligned with the registry order). Two entrypoints — both work:</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># canonical entrypoint (what the app's Vote page calls)</span>
+cast send $VM <span class="s">'voteWithData(uint256[],bytes)'</span> <span class="s">"[20,15,13,12,9,8]"</span> 0x \
+  --rpc-url $RPC --private-key $MEMBER_KEY
+
+<span class="cmt"># or the COVA module's direct entrypoint (supports re-casting within a cycle)</span>
+cast send $VM <span class="s">'castVote(uint256[])'</span> <span class="s">"[18,14,13,12,9,7]"</span> \
+  --rpc-url $RPC --private-key $MEMBER_KEY</code></pre>
+    <div class="note warn"><b>The ballot total must be ≤ 100.</b> Unlike the canonical module (per-recipient cap only), the cooperative ballot's <i>sum</i> is capped at 100 — the point array above sums to 77. Over 100 reverts.</div>
+  </section>
+
+  <!-- 18 -->
+  <section class="slide">
+    <div class="kicker">Phase 5 · pay out</div>
+    <h2>Advance the cycle &amp; distribute</h2>
+    <p class="lead">Once the cycle length has elapsed (blocks) and there's at least a wei of yield per project, anyone can trigger the round.</p>
+    <pre><button class="copy">Copy</button><code><span class="cmt"># ready only when: cycle complete + votes cast this cycle + yield ≥ #projects</span>
+cast call $DM <span class="s">'isDistributionReady()(bool)'</span> --rpc-url $RPC   <span class="cmt"># → true</span>
+
+cast send $DM <span class="s">'claimAndDistribute()'</span> --rpc-url $RPC --private-key $PK
+
+<span class="cmt"># check a project got funded (cUSD minted straight to the recipient)</span>
+cast call $TOK <span class="s">'balanceOf(address)(uint256)'</span> 0xPROJECT_1 --rpc-url $RPC
+cast call $DM  <span class="s">'cycleManager()(address)'</span> --rpc-url $RPC   <span class="cmt"># cycle module; getCurrentCycle() bumps to 2</span></code></pre>
+    <div class="note ok">This is the exact path the fork test drove against these live contracts — it reproduced the worked example (Mural 2584, Theatre 1972, Zine capped at 1200, Sculpture dropped below its floor) to the wei against real sDAI.</div>
+  </section>
+
+  <!-- 19 -->
+  <section class="slide">
+    <div class="kicker">Phase 5 · use it in the app</div>
+    <h2>Drive it from the UI</h2>
+    <p class="lead">The instance is a standalone, shareable page. Open the link the wizard gave you (or build it):</p>
+    <pre><button class="copy">Copy</button><code>https://&lt;your-app&gt;/app/?i=$DM&amp;c=100
+<span class="cmt"># or, relative to these docs:</span>
+../app/?i=$DM&amp;c=100</code></pre>
+    <ul>
+      <li><b>Deposit</b> — wrap &amp; mint cUSD from the UI instead of <code>cast</code>.</li>
+      <li><b>Vote</b> — the 100-point ballot; the page reads <code>maxPoints()</code> and calls <code>voteWithData</code>.</li>
+      <li><b>Recipients</b> — see the registered projects.</li>
+      <li><b>Distribute</b> — trigger the round when it's ready.</li>
+    </ul>
+    <div class="note">The app resolves the whole instance from just <code>$DM</code> (via <code>resolveInstance</code>) and stores it in your instance switcher — the same flow the wizard used to register it on the success screen.</div>
+  </section>
+
+  <!-- 20 -->
+  <section class="slide">
+    <div class="kicker">Recap · one-screen cheat sheet</div>
+    <h2>The whole flow</h2>
+    <div class="two">
+      <div>
+        <p><b>Ship</b></p>
+        <ul>
+          <li>Push to <code>main</code> (this repo) → frontend auto-deploys</li>
+          <li>Run <code>contracts-deploy</code> (DeployCrowdStakeDeployer) → deployer indexed in the release manifest</li>
+        </ul>
+        <p><b>Wizard</b></p>
+        <ul>
+          <li><a href="../app/deploy/"><code>../app/deploy/</code></a> → Custom modules → paste 5 addresses → Deploy</li>
+          <li>Save <code>$DM</code> from the success screen</li>
+        </ul>
+      </div>
+      <div>
+        <p><b>Wire (as coordinator)</b></p>
+        <ul>
+          <li><code>TOK.setYieldClaimer($DM)</code></li>
+          <li><code>STRAT.initialize(TOK,$DM,COORD,5)</code></li>
+          <li><code>VM.initialize([POWER],$DM,COORD)</code></li>
+        </ul>
+        <p><b>Seed &amp; run</b></p>
+        <ul>
+          <li><code>POWER.addMembers([...])</code></li>
+          <li><code>REG.registerProject(...)</code> ×N → <code>processQueue()</code></li>
+          <li>mint cUSD → vote → wait → <code>DM.claimAndDistribute()</code></li>
+        </ul>
+      </div>
+    </div>
+    <div class="note warn"><b>If distribution won't trigger:</b> check <code>isDistributionReady()</code> — you need (1) the cycle elapsed, (2) at least one member vote <i>this</i> cycle, and (3) yield ≥ number of projects. All three, or it reverts <code>DistributionNotReady</code>.</div>
+    <div class="asterisks">✳✳✳✳✳✳</div>
+  </section>
+
+</div>
+
+<div class="foot">
+  <div class="counter"><span id="cur">1</span> / <span id="tot">20</span></div>
+  <div class="nav">
+    <button class="btn" id="prev">← Back</button>
+    <button class="btn primary" id="next">Next →</button>
+  </div>
+</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0;
+  const tot=slides.length;
+  document.getElementById('tot').textContent=tot;
+  function show(n){
+    i=Math.max(0,Math.min(tot-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+    document.getElementById('cur').textContent=i+1;
+    document.getElementById('progress').style.width=((i+1)/tot*100)+'%';
+    document.getElementById('prev').style.visibility=i===0?'hidden':'visible';
+    slides[i].scrollTop=0;
+  }
+  document.getElementById('next').onclick=()=>show(i+1);
+  document.getElementById('prev').onclick=()=>show(i-1);
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();show(i+1)}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();show(i-1)}
+    else if(e.key==='Home'){show(0)} else if(e.key==='End'){show(tot-1)}
+  });
+  // copy buttons
+  document.querySelectorAll('pre .copy').forEach(btn=>{
+    btn.onclick=()=>{
+      const code=btn.parentElement.querySelector('code');
+      const text=code.innerText.replace(/ /g,' ');
+      navigator.clipboard.writeText(text).then(()=>{
+        const o=btn.textContent;btn.textContent='Copied ✓';
+        setTimeout(()=>btn.textContent=o,1200);
+      });
+    };
+  });
+  show(0);
+</script>
+</body>
+</html>

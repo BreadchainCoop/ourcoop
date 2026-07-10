@@ -17,10 +17,10 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Community Funding Calculator
- * ----------------------------
+ * Art Fund Calculator
+ * -------------------
  * A two-lens planner over one canonical scenario {members, stake, apy, …}:
- * "Your community" projects what a community of a given size can fund;
+ * "Your cooperative" projects what a cooperative of a given size can fund;
  * "Hit a target" goal-seeks the members or stake needed for a monthly amount.
  * Both lenses read and write the same state, so they can never disagree.
  *
@@ -65,16 +65,22 @@ const APY_PRESETS = [
 ] as const;
 const MILESTONES = [250, 500, 1000, 5000] as const;
 const PRESETS = [
-  { key: "club", label: "Running club", members: 25, stake: 200, target: 100 },
+  { key: "print", label: "Print studio", members: 25, stake: 200, target: 100 },
+  { key: "zine", label: "Zine press", members: 60, stake: 150, target: 150 },
   {
-    key: "neighborhood",
-    label: "Neighborhood",
-    members: 120,
-    stake: 250,
-    target: 250,
+    key: "mural",
+    label: "Community mural",
+    members: 75,
+    stake: 400,
+    target: 200,
   },
-  { key: "mutual", label: "Mutual aid", members: 75, stake: 400, target: 200 },
-  { key: "dao", label: "DAO", members: 300, stake: 1000, target: 1500 },
+  {
+    key: "residency",
+    label: "Artist residency",
+    members: 300,
+    stake: 1000,
+    target: 1500,
+  },
 ] as const;
 
 const CYCLE_DAYS = 30;
@@ -241,9 +247,7 @@ export function FundingCalculator() {
     <div className="border-primary-jade bg-paper-0 w-full rounded-2xl border-2 p-6 shadow-2xl sm:p-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
-        <Heading3 className="text-text-standard">
-          Community Funding Calculator
-        </Heading3>
+        <Heading3 className="text-text-standard">Art Fund Calculator</Heading3>
         <button
           type="button"
           onClick={() => setState(DEFAULTS)}
@@ -270,7 +274,7 @@ export function FundingCalculator() {
       >
         {(
           [
-            ["community", "Your community"],
+            ["community", "Your cooperative"],
             ["target", "Hit a target"],
           ] as const
         ).map(([mode, label]) => (
@@ -295,7 +299,7 @@ export function FundingCalculator() {
       {/* Presets */}
       <div className="mt-4">
         <Caption className="text-surface-grey-2">
-          Start from a community like yours
+          Start from a project like yours
         </Caption>
         <div className="mt-2 flex flex-wrap gap-2">
           {PRESETS.map((p) => (
@@ -488,7 +492,7 @@ export function FundingCalculator() {
       {/* Hero result */}
       <div className="mt-5 text-center" aria-live="polite" aria-atomic="true">
         <Caption className="text-surface-grey-2">
-          Monthly funding for your community
+          Monthly Art Fund for your cooperative
         </Caption>
         <p className="font-breadDisplay text-core-orange mt-1 text-5xl font-extrabold tracking-tight">
           ≈ {approxUsd(d.monthly)}

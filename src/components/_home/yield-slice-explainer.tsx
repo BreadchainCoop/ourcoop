@@ -19,10 +19,10 @@ import { cn } from "@/lib/utils";
 /**
  * YieldSliceExplainer
  * -------------------
- * A friendly, step-by-step visualization of the Crowdstaking mechanism:
+ * A friendly, step-by-step visualization of the O.U.R.COOP mechanism:
  * deposits earn interest through over-collateralized lending (sDAI), and only
- * a *slice of the yield* is skimmed off the top for the community's cause —
- * the principal always stays whole and withdrawable.
+ * a *slice of the yield* is skimmed off the top for the cooperative's Art
+ * Fund — the principal always stays whole and withdrawable.
  *
  * The diagram is persistent; each step highlights a different part of the flow
  * (deposit → vault/lending engine → yield slice → recipients) and swaps in a
@@ -44,7 +44,7 @@ const STEPS: {
     key: "deposit",
     short: "Deposit",
     title: "You deposit — and stay in control",
-    body: "Add WXDAI to the shared pool and instantly receive CSTAKE, 1:1. That token is your receipt: your principal never leaves your control, and you can withdraw it in full at any time.",
+    body: "Add WXDAI to the cooperative's pool and instantly receive cUSD, 1:1. That token is your receipt: your principal never leaves your control, and you can withdraw it in full at any time.",
     chip: "Your principal: 100% yours",
     Icon: Wallet,
   },
@@ -68,15 +68,15 @@ const STEPS: {
     key: "slice",
     short: "Slice",
     title: "A slice comes off the top",
-    body: "Each cycle, only that interest slice is skimmed off — never your principal. The community's weighted votes decide exactly how the slice is split across the causes you care about.",
+    body: "Each cycle, only that interest slice is skimmed off — never your principal. Members' 100-point ballots decide exactly how the slice is split across the projects on the ballot.",
     chip: "Only the yield moves",
     Icon: Scissors,
   },
   {
     key: "fund",
     short: "Fund",
-    title: "Your cause gets funded — for free",
-    body: "The slice is sent to your chosen recipients and a fresh cycle begins. Whenever you like, burn CSTAKE to get your full principal back, 1:1. You funded something real without spending a cent of your savings.",
+    title: "Art gets funded — for free",
+    body: "The slice is sent to the round's winning projects and a fresh cycle begins. Whenever you like, burn cUSD to get your full principal back, 1:1. You funded real work without spending a cent of your savings.",
     chip: "Withdraw principal anytime",
     Icon: Confetti,
   },
@@ -115,12 +115,12 @@ export function YieldSliceExplainer() {
             </Chip>
           </div>
           <Heading2 className="text-text-standard mt-4">
-            Where the funding comes from
+            Where the Art Fund comes from
           </Heading2>
           <Body className="text-surface-grey-2 mx-auto mt-4 text-lg">
             Your savings do the work while staying yours. Here&apos;s how a
-            slice of yield — and only the yield — turns into funding for your
-            community.
+            slice of yield — and only the yield — turns into the
+            cooperative&apos;s Art Fund.
           </Body>
         </div>
 
@@ -305,7 +305,7 @@ function FlowDiagram({
           reducedMotion={reducedMotion}
           icon={<Wallet size={22} weight="bold" />}
           label="Your deposit"
-          value="WXDAI → CSTAKE"
+          value="WXDAI → cUSD"
           sub="minted 1:1"
         />
 
@@ -415,9 +415,9 @@ function FlowDiagram({
           lit={on.recipients}
           reducedMotion={reducedMotion}
           icon={<Confetti size={22} weight="bold" />}
-          label="Your cause"
-          value="Voted recipients"
-          sub="funded each cycle"
+          label="The Art Fund"
+          value="Voted projects"
+          sub="funded each round"
         />
       </div>
 
@@ -429,7 +429,7 @@ function FlowDiagram({
           className="text-surface-grey"
         />
         <Caption className="text-surface-grey">
-          Your principal loops back to you — burn CSTAKE for WXDAI 1:1, anytime.
+          Your principal loops back to you — burn cUSD for WXDAI 1:1, anytime.
         </Caption>
       </div>
     </div>

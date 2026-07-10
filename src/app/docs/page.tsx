@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Body, Button, Caption, Logo } from "@breadcoop/ui";
+import { Body, Button, Caption } from "@breadcoop/ui";
+import { OurCoopLogo } from "@/components/ourcoop-logo";
 import {
   ArrowRight,
   ArrowsLeftRight,
@@ -141,7 +142,7 @@ const FLOWS: Flow[] = [
     icon: <Rocket weight="duotone" />,
     title: "Deploy your own instance",
     blurb:
-      "Launch a complete, self-owned Crowdstaking system on Gnosis in a single transaction via the CrowdStakeDeployer. You become the admin of every contract.",
+      "Launch a complete, self-owned O.U.R.COOP system on Gnosis in a single transaction via the CrowdStakeDeployer. You become the admin of every contract.",
     steps: [
       "Name your token and symbol, and set a cycle length in blocks (~5s each on Gnosis).",
       "Optionally set an owner (defaults to your address).",
@@ -190,7 +191,7 @@ export default function DocsPage() {
           Every flow, end to end
         </h1>
         <Body className="text-surface-grey-2 mt-4 max-w-2xl text-lg">
-          A step-by-step walkthrough of Crowdstaking on Gnosis — from sizing a
+          A step-by-step walkthrough of O.U.R.COOP on Gnosis — from sizing a
           community fund to depositing, voting, distributing yield, and
           deploying your own instance. Each section pairs a short recording with
           the exact steps.
@@ -285,6 +286,28 @@ export default function DocsPage() {
           </div>
         </section>
 
+        {/* Custom-modules runbook */}
+        <section id="runbook" className="scroll-mt-20">
+          <a
+            href={`${BASE}/docs/runbook.html`}
+            className="border-paper-2 bg-paper-0 hover:bg-paper-1 flex items-center justify-between gap-4 rounded-2xl border p-5 transition-colors"
+          >
+            <div>
+              <h2 className="font-breadDisplay text-text-standard text-xl font-extrabold tracking-tight">
+                Custom-modules runbook
+              </h2>
+              <Body className="text-surface-grey-2 mt-1 text-sm">
+                {
+                  "Deploy the cooperative's own modules (cUSD token, project registry, 100-point voting, art-fund strategy) through the wizard — the complete click-by-click guide."
+                }
+              </Body>
+            </div>
+            <span className="bg-core-orange/10 text-core-orange inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
+              <ArrowSquareOut weight="duotone" size={20} />
+            </span>
+          </a>
+        </section>
+
         {/* Footer CTA */}
         <section className="border-paper-2 bg-paper-0 rounded-3xl border px-8 py-12 text-center">
           <h2 className="font-breadDisplay text-text-standard text-3xl font-extrabold tracking-tight">
@@ -371,10 +394,7 @@ function DocsNav() {
     <header className="border-paper-2 bg-paper-main/80 sticky top-0 z-50 border-b backdrop-blur">
       <nav className="section-container flex h-16 items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
-          <Logo variant="square" color="orange" size={32} />
-          <span className="font-breadDisplay text-text-standard text-xl font-bold">
-            Crowdstaking
-          </span>
+          <OurCoopLogo size={28} wordmarkClassName="text-xl" />
         </Link>
         <div className="flex items-center gap-3">
           <Button app="fund" variant="secondary" size="sm" as={Link} href="/">

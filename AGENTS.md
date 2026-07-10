@@ -1,4 +1,6 @@
-# crowdstake.fun — Agent & Contributor Guide
+# ourcoop — Agent & Contributor Guide
+
+This is the O.U.R.COOP-branded fork of crowdstake.fun; brand tokens are overridden in `src/app/globals.css` (purple theme), everything else is unchanged.
 
 Monorepo: a **Next.js frontend at the repo root** and the **Foundry smart contracts under `contracts/`**.
 

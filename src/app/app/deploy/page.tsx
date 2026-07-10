@@ -730,75 +730,75 @@ function DeployForm() {
       </Field>
 
       {!hasRegistryOvr && (
-      <div className="mb-4">
-        <Caption className="text-surface-grey-2 mb-1.5 block">
-          Recipient governance
-        </Caption>
-        <div className="border-paper-2 inline-flex rounded-xl border p-1">
-          {(["admin", "voting"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setRegistryKind(k)}
-              className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
-                registryKind === k
-                  ? "bg-core-orange text-white"
-                  : "text-surface-grey-2 hover:text-text-standard"
-              }`}
-            >
-              {k === "admin" ? "Admin-managed" : "Democratic"}
-            </button>
-          ))}
-        </div>
-        {isMultiChain && democratic && (
-          <Caption className="text-surface-grey mt-1.5 block">
-            Cross-chain democratic community: the founding recipients are shared
-            on every chain, and proposals + votes are signed once and replayed
-            across chains — no per-chain re-signing.
+        <div className="mb-4">
+          <Caption className="text-surface-grey-2 mb-1.5 block">
+            Recipient governance
           </Caption>
-        )}
-        {isMultiChain && !democratic && (
-          <Caption className="text-surface-grey mt-1.5 block">
-            Admin-managed recipients — sync the list across chains with one
-            signature from the Admin page.
-          </Caption>
-        )}
-        {democratic && (
-          <div className="mt-4 space-y-4">
-            <Field label="Founding recipients (one address per line)">
-              <textarea
-                value={foundersText}
-                onChange={(e) => setFoundersText(e.target.value)}
-                placeholder={address ?? "0x…"}
-                rows={3}
-                className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-4 py-3 font-mono text-sm outline-none"
-              />
-              {foundersText.trim() !== "" && !foundersValid && (
-                <Caption className="text-system-red mt-1 block">
-                  Enter unique, valid, non-zero addresses.
-                </Caption>
-              )}
-              <Caption className="text-surface-grey mt-1 block">
-                These members vote to add/remove future recipients (additions
-                need everyone&apos;s vote). Blank defaults to you. The owner
-                can&apos;t add recipients directly.
-              </Caption>
-            </Field>
-            <Field label="Proposal expiry (days)">
-              <Input
-                value={expiryDays}
-                onChange={setExpiryDays}
-                placeholder="7"
-              />
-              {!expiryValid && expiryDays !== "" && (
-                <Caption className="text-system-red mt-1 block">
-                  Must be a positive integer.
-                </Caption>
-              )}
-            </Field>
+          <div className="border-paper-2 inline-flex rounded-xl border p-1">
+            {(["admin", "voting"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setRegistryKind(k)}
+                className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
+                  registryKind === k
+                    ? "bg-core-orange text-white"
+                    : "text-surface-grey-2 hover:text-text-standard"
+                }`}
+              >
+                {k === "admin" ? "Admin-managed" : "Democratic"}
+              </button>
+            ))}
           </div>
-        )}
-      </div>
+          {isMultiChain && democratic && (
+            <Caption className="text-surface-grey mt-1.5 block">
+              Cross-chain democratic community: the founding recipients are
+              shared on every chain, and proposals + votes are signed once and
+              replayed across chains — no per-chain re-signing.
+            </Caption>
+          )}
+          {isMultiChain && !democratic && (
+            <Caption className="text-surface-grey mt-1.5 block">
+              Admin-managed recipients — sync the list across chains with one
+              signature from the Admin page.
+            </Caption>
+          )}
+          {democratic && (
+            <div className="mt-4 space-y-4">
+              <Field label="Founding recipients (one address per line)">
+                <textarea
+                  value={foundersText}
+                  onChange={(e) => setFoundersText(e.target.value)}
+                  placeholder={address ?? "0x…"}
+                  rows={3}
+                  className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-4 py-3 font-mono text-sm outline-none"
+                />
+                {foundersText.trim() !== "" && !foundersValid && (
+                  <Caption className="text-system-red mt-1 block">
+                    Enter unique, valid, non-zero addresses.
+                  </Caption>
+                )}
+                <Caption className="text-surface-grey mt-1 block">
+                  These members vote to add/remove future recipients (additions
+                  need everyone&apos;s vote). Blank defaults to you. The owner
+                  can&apos;t add recipients directly.
+                </Caption>
+              </Field>
+              <Field label="Proposal expiry (days)">
+                <Input
+                  value={expiryDays}
+                  onChange={setExpiryDays}
+                  placeholder="7"
+                />
+                {!expiryValid && expiryDays !== "" && (
+                  <Caption className="text-system-red mt-1 block">
+                    Must be a positive integer.
+                  </Caption>
+                )}
+              </Field>
+            </div>
+          )}
+        </div>
       )}
 
       <div className="mb-4">
@@ -920,8 +920,8 @@ function DeployForm() {
               </Caption>
             )}
             <Caption className="text-surface-grey mt-1 block">
-              Used as-is (e.g. a one-person-one-vote membership contract).
-              Blank keeps the canonical time-weighted strategy.
+              Used as-is (e.g. a one-person-one-vote membership contract). Blank
+              keeps the canonical time-weighted strategy.
             </Caption>
           </Field>
         </div>
@@ -1274,8 +1274,12 @@ function FollowUpButton({
   dm: Address;
   chainId: number;
 }) {
-  const { writeContractAsync, data: hash, isPending, error } =
-    useWriteContract();
+  const {
+    writeContractAsync,
+    data: hash,
+    isPending,
+    error,
+  } = useWriteContract();
   // "Done" only once MINED — a submitted-but-pending (or reverted) tx must not
   // grey the button out as if the wiring were complete.
   const {

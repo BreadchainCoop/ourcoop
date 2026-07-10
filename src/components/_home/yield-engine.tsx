@@ -38,7 +38,7 @@ type Step = {
 const STEPS: Step[] = [
   {
     title: "Your deposit is lent out",
-    body: "The pool's stablecoins don't sit idle. They're lent out to borrowers — your community's dollars become the lending capital that the whole system runs on.",
+    body: "The pool's stablecoins don't sit idle. They're lent out to borrowers — the cooperative's dollars become the lending capital that the whole system runs on.",
     caption: "Pool dollars → lent to borrowers",
     Visual: LendVisual,
   },
@@ -62,7 +62,7 @@ const STEPS: Step[] = [
   },
   {
     title: "Borrowers pay interest — that's your yield",
-    body: "For borrowing, they pay interest the whole time the loan is open. That interest flows back into the pool and settles on top of everyone's principal. It's the yield your community distributes — earned without anyone spending their savings.",
+    body: "For borrowing, they pay interest the whole time the loan is open. That interest flows back into the pool and settles on top of everyone's principal. It's the Art Fund the cooperative distributes — earned without anyone spending their savings.",
     caption: "Borrower interest → stacks on top as yield",
     Visual: InterestVisual,
   },
@@ -83,9 +83,9 @@ export function YieldEngine() {
           </Heading2>
           <Body className="text-surface-grey-2 mx-auto mt-4 text-lg">
             A closer look at step 2. The yield isn&apos;t magic — it&apos;s the
-            interest borrowers pay to take over-collateralized loans against
-            your pool. Here&apos;s the full chain, and why your principal is
-            never at risk.
+            interest borrowers pay to take over-collateralized loans against the
+            cooperative&apos;s pool. Here&apos;s the full chain, and why your
+            principal is never at risk.
           </Body>
         </div>
 

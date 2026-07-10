@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>O.U.R.COOP — Governance demo</title>
+<style>
+/* ============== Fonts ============== */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/archivo-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/archivo-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ============== Reset & base ============== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --paper: #F7F5FC;
+  --paper-2: #EFEAF9;
+  --card: #FFFFFF;
+  --ink: #17121F;
+  --ink-soft: #443A5A;
+  --muted: #7B7292;
+  --line: #E7E1F4;
+  --line-2: #CFC5E8;
+  --purple: #7845DC;
+  --purple-hover: #6335C4;
+  --lilac: #C9B4F4;
+  --violet: #4A3591;
+  --good: #2E9E5B;
+  --bad: #D1493C;
+  --info: #4C42C9;
+  --poster-1: #1A1026;
+  --poster-2: #2A1745;
+  --shadow: 0 4px 14px rgba(23,18,31,.06), 0 1px 2px rgba(23,18,31,.04);
+}
+html, body { height: 100%; font-family: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); background: var(--paper); }
+h1, h2, h3, h4 { letter-spacing: -.02em; font-weight: 800; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--purple); text-decoration: none; }
+a:hover { color: var(--purple-hover); }
+button { cursor: pointer; border: none; background: none; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; }
+
+.screen { display: none; min-height: 100vh; }
+.screen.active { display: block; }
+
+/* ============== Landing (poster panel) ============== */
+#landing.active { display: grid; place-items: center; }
+#landing {
+  position: relative; overflow: hidden;
+  background:
+    radial-gradient(900px 560px at 85% -10%, rgba(120,69,220,.38) 0, transparent 60%),
+    radial-gradient(700px 480px at -10% 95%, rgba(201,180,244,.16) 0, transparent 55%),
+    linear-gradient(160deg, var(--poster-1) 0%, var(--poster-2) 100%);
+  color: #F1EAFB;
+  padding: 56px 24px;
+}
+.poster-inner { position: relative; z-index: 1; max-width: 820px; display: flex; flex-direction: column; gap: 22px; }
+.big-ast { color: var(--lilac); width: 116px; height: 116px; }
+.kicker { color: var(--lilac); font-weight: 700; font-size: 15px; letter-spacing: .04em; }
+.poster-inner h1 { font-size: clamp(58px, 11vw, 104px); font-weight: 900; letter-spacing: -.035em; color: #fff; line-height: .95; }
+.poster-tag { color: #CBBDE8; font-size: 18px; line-height: 1.55; max-width: 640px; }
+.ast-row { color: var(--lilac); letter-spacing: 14px; font-size: 15px; user-select: none; }
+.poster-meta { display: flex; flex-wrap: wrap; gap: 8px 22px; color: #A794CE; font-size: 13px; font-weight: 500; }
+.poster-actions { display: flex; align-items: center; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
+.btn.poster-ghost { background: transparent; color: var(--lilac); border: 1px solid rgba(201,180,244,.55); }
+.btn.poster-ghost:hover { background: rgba(201,180,244,.12); }
+.quiet-link { color: #A794CE; font-size: 14px; border-bottom: 1px solid rgba(167,148,206,.4); padding-bottom: 1px; }
+.quiet-link:hover { color: var(--lilac); }
+
+/* ============== Buttons ============== */
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; font-weight: 600; transition: transform .04s, background .15s, border-color .15s; border: 1px solid transparent; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--purple); color: #fff; }
+.btn.primary:hover { background: var(--purple-hover); }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-2); }
+.btn.ghost:hover { background: var(--paper-2); }
+.btn.danger { background: var(--bad); color: #fff; }
+.btn.danger-ghost { background: transparent; color: var(--bad); border-color: #EFC5BF; }
+.btn.danger-ghost:hover { background: #FBEAE7; }
+.btn.good { background: var(--good); color: #fff; }
+.btn.small { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
+.btn.big { padding: 14px 22px; font-size: 16px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ============== App chrome ============== */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  background: rgba(247,245,252,.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; padding: 10px 20px;
+}
+.topbar-left { display: flex; align-items: center; gap: 10px; }
+.brand-mini { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 16px; }
+.brand-mini svg { color: var(--purple); }
+.brand-mini strong { font-weight: 900; letter-spacing: -.02em; }
+.env-pill { background: #EDE5FB; color: var(--violet); padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid #D8C9F6; white-space: nowrap; }
+.topnav { flex: 1; display: flex; gap: 4px; overflow-x: auto; padding: 0 8px; }
+.topnav button { padding: 8px 14px; border-radius: 8px; color: var(--ink-soft); font-weight: 600; white-space: nowrap; }
+.topnav button:hover { background: var(--paper-2); color: var(--ink); }
+.topnav button.active { background: var(--purple); color: #fff; }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.treasury-mini { font-size: 12px; color: var(--ink-soft); border: 1px solid var(--line); padding: 6px 10px; border-radius: 8px; background: var(--card); white-space: nowrap; }
+.role-switch label { font-size: 12px; color: var(--muted); margin-right: 6px; }
+.role-switch select { border: 1px solid var(--line-2); padding: 6px 10px; border-radius: 8px; background: var(--card); }
+
+.main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.page-head h2 { font-size: 30px; font-weight: 900; }
+.page-head .kick { color: var(--purple); font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.page-head .sub { color: var(--ink-soft); margin-top: 4px; max-width: 760px; line-height: 1.5; }
+.page-section + .page-section { margin-top: 28px; }
+.section-title { font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--violet); margin-bottom: 12px; }
+.ast-sep { color: var(--lilac); letter-spacing: 14px; font-size: 14px; text-align: center; margin: 30px 0 4px; user-select: none; }
+
+.grid { display: grid; gap: 18px; }
+.grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) {
+  .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+}
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: var(--shadow); }
+.card h4 { font-size: 17px; margin-bottom: 6px; }
+.card .desc { color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+.kv { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 14px; gap: 12px; }
+.kv:last-child { border-bottom: none; }
+.kv .k { color: var(--ink-soft); }
+.kv .v { font-weight: 700; }
+
+.metric { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: var(--shadow); }
+.metric .label { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.metric .value { font-size: 24px; font-weight: 800; margin-top: 4px; }
+.metric .delta { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+.metric.accent { background: linear-gradient(160deg, #F1EAFC, #FFFFFF); border-color: var(--line-2); }
+
+.badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--paper-2); color: var(--ink-soft); border: 1px solid var(--line); white-space: nowrap; }
+.badge.good { background: #E3F3E9; color: var(--good); border-color: #BFE2CD; }
+.badge.bad { background: #FBE7E4; color: var(--bad); border-color: #EFC9C3; }
+.badge.warn { background: #EDE5FB; color: var(--violet); border-color: #D8C9F6; }
+.badge.info { background: #E6E4F8; color: var(--info); border-color: #C9C5EF; }
+
+.check-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.check-row:last-child { border-bottom: none; }
+.check-row .ok { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; flex: none; }
+.check-row .ok.yes { background: #E3F3E9; color: var(--good); }
+.check-row .ok.no { background: #FBE7E4; color: var(--bad); }
+.check-row .hint { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
+
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th, .tbl td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; font-size: 14px; vertical-align: middle; }
+.tbl th { color: var(--muted); font-weight: 700; font-size: 12px; letter-spacing: .03em; }
+.tbl tr:hover { background: #F3EFFB; }
+
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field label { font-size: 13px; color: var(--ink-soft); font-weight: 600; }
+.field input, .field select, .field textarea {
+  border: 1px solid var(--line-2); border-radius: 8px; padding: 9px 11px; background: #fff;
+}
+.field input:focus, .field textarea:focus, .field select:focus { outline: 2px solid var(--lilac); }
+.field textarea { min-height: 80px; resize: vertical; }
+.field .hint { font-size: 12px; color: var(--muted); }
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; }
+
+.pbar { height: 8px; background: var(--paper-2); border-radius: 999px; overflow: hidden; margin: 6px 0; }
+.pbar > div { height: 100%; background: linear-gradient(90deg, var(--purple), var(--lilac)); }
+
+.pt-slider { display: grid; grid-template-columns: 1fr 80px 130px; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+.pt-slider .pt-meta { font-size: 12px; color: var(--muted); }
+.pt-slider input[type=number] { width: 70px; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 8px; background: #fff; }
+.pt-slider input[type=range] { width: 100%; accent-color: var(--purple); }
+
+.tally-row { display: grid; grid-template-columns: 2fr 70px 70px 110px 100px 90px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.tally-row.head { font-weight: 700; color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+.tally-row .nm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tally-row .status { font-weight: 600; }
+
+.empty { padding: 36px; text-align: center; color: var(--muted); border: 1px dashed var(--line-2); border-radius: 12px; }
+.flex { display: flex; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mt-24 { margin-top: 24px; }
+.muted { color: var(--muted); font-size: 13px; }
+.small { font-size: 12px; }
+.right { text-align: right; }
+.spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.divider { height: 1px; background: var(--line); margin: 14px 0; }
+
+.hero {
+  background: linear-gradient(135deg, #F1EAFC, #FFFFFF);
+  border: 1px solid var(--line); border-radius: 18px;
+  padding: 22px 24px; display: flex; gap: 18px; align-items: center; box-shadow: var(--shadow); margin-bottom: 20px; flex-wrap: wrap;
+}
+.hero .avatar { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--purple), var(--violet)); display: grid; place-items: center; color: var(--lilac); flex: none; }
+.hero h3 { font-size: 20px; font-weight: 800; }
+.hero p { color: var(--ink-soft); font-size: 14px; margin-top: 2px; }
+.hero .spacer { flex: 1; }
+
+.modal-host { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; }
+.modal-host.hidden { display: none; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(23,18,31,.5); }
+.modal-card { position: relative; background: #fff; border-radius: 14px; padding: 24px; max-width: 560px; width: calc(100% - 32px); max-height: 88vh; overflow: auto; box-shadow: 0 20px 60px rgba(23,18,31,.3); }
+.modal-card h3 { margin-bottom: 10px; }
+.modal-card .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+.toasts { position: fixed; bottom: 18px; right: 18px; z-index: 80; display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+.toast { background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 22px rgba(23,18,31,.25); display: flex; gap: 10px; align-items: flex-start; animation: slideIn .25s; }
+.toast.good { background: var(--good); }
+.toast.bad { background: var(--bad); }
+.toast.info { background: var(--info); }
+@keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+.footer { text-align: center; color: var(--muted); padding: 24px; font-size: 12px; border-top: 1px solid var(--line); margin-top: 40px; }
+
+.demo-overlay { position: fixed; inset: 0; z-index: 100; pointer-events: none; }
+.demo-overlay.hidden { display: none; }
+.demo-overlay:before {
+  content: ''; position: fixed; inset: 0;
+  background: rgba(23,16,38,.6);
+  pointer-events: auto; z-index: 0;
+}
+.demo-spot {
+  position: absolute; border-radius: 14px;
+  border: 3px solid var(--purple);
+  box-shadow: 0 0 0 6px rgba(201,180,244,.4), 0 0 24px rgba(255,255,255,.4);
+  transition: top .25s ease, left .25s ease, width .25s ease, height .25s ease;
+  pointer-events: none; background: transparent; z-index: 1;
+}
+.demo-spot.active { display: block; }
+.demo-spot:not(.active) { display: none; }
+.demo-card {
+  position: absolute; pointer-events: auto;
+  background: #fff; border-radius: 14px; padding: 18px 20px; width: 380px;
+  box-shadow: 0 12px 40px rgba(23,16,38,.4);
+  transition: top .25s, left .25s; z-index: 2;
+}
+.demo-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.demo-step-label { font-size: 11px; color: var(--purple); font-weight: 700; letter-spacing: .04em; }
+.demo-x { font-size: 22px; color: var(--muted); width: 28px; height: 28px; border-radius: 6px; }
+.demo-x:hover { background: var(--paper-2); color: var(--ink); }
+.demo-card h3 { margin-bottom: 6px; }
+.demo-card p { color: var(--ink-soft); font-size: 14px; line-height: 1.5; margin-bottom: 14px; }
+.demo-actions { display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+
+<!-- ===================== LANDING ===================== -->
+<section id="landing" class="screen active">
+  <div class="poster-inner">
+    <svg class="big-ast" viewBox="0 0 100 100" aria-hidden="true">
+      <g fill="currentColor">
+        <rect x="41" y="3" width="18" height="94" rx="2"/>
+        <rect x="41" y="3" width="18" height="94" rx="2" transform="rotate(60 50 50)"/>
+        <rect x="41" y="3" width="18" height="94" rx="2" transform="rotate(120 50 50)"/>
+      </g>
+    </svg>
+    <div class="kicker">✳ Governance demo</div>
+    <h1>O.U.R.COOP</h1>
+    <p class="poster-tag">An international artists' cooperative. Members pool principal, the yield funds art, and every member holds exactly one vote. Principal is always redeemable 1:1.</p>
+    <div class="ast-row">✳ ✳ ✳ ✳ ✳ ✳</div>
+    <div class="poster-meta">
+      <span>→ Shared Visions · Kulturni sklop, Belgrade</span>
+      <span>→ co-funded by the European Union</span>
+      <span>→ mock data, no real funds</span>
+    </div>
+    <div class="poster-actions">
+      <button class="btn primary big" id="enter-app-btn">Enter demo →</button>
+      <button class="btn poster-ghost big" id="start-demo-btn">Guided tour ▶</button>
+      <a class="quiet-link" href="../app/">Real app →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== APP ===================== -->
+<section id="app" class="screen">
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="#" class="brand-mini" id="brand-home">
+        <svg width="18" height="18" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="currentColor">
+            <rect x="41" y="3" width="18" height="94" rx="2"/>
+            <rect x="41" y="3" width="18" height="94" rx="2" transform="rotate(60 50 50)"/>
+            <rect x="41" y="3" width="18" height="94" rx="2" transform="rotate(120 50 50)"/>
+          </g>
+        </svg>
+        <strong>O.U.R.COOP</strong>
+      </a>
+      <span class="env-pill">governance demo</span>
+    </div>
+
+    <nav class="topnav" id="topnav"></nav>
+
+    <div class="topbar-right">
+      <div class="treasury-mini" id="treasury-mini"></div>
+      <div class="role-switch">
+        <label>View as:</label>
+        <select id="role-select">
+          <option value="mira">Mira (member · coordinator)</option>
+          <option value="jules">Jules (member)</option>
+        </select>
+      </div>
+      <button class="btn small ghost" id="restart-demo">▶ Tour</button>
+      <button class="btn small danger-ghost" id="reset-state">⟳ Reset</button>
+    </div>
+  </header>
+
+  <main id="main" class="main"></main>
+
+  <footer class="footer">
+    <span>O.U.R.COOP governance demo · mock data, no real funds · the real app runs on Gnosis · <a href="../app/">Enter the real app →</a></span>
+  </footer>
+</section>
+
+<!-- ===================== TOUR OVERLAY ===================== -->
+<div id="demo-overlay" class="demo-overlay hidden">
+  <div class="demo-spot" id="demo-spot"></div>
+  <div class="demo-card" id="demo-card">
+    <div class="demo-card-head">
+      <span class="demo-step-label" id="demo-step-label">Step 1 / 10</span>
+      <button class="demo-x" id="demo-close">×</button>
+    </div>
+    <h3 id="demo-title">Welcome</h3>
+    <p id="demo-text">…</p>
+    <div class="demo-actions">
+      <button class="btn ghost small" id="demo-back">← Back</button>
+      <button class="btn primary small" id="demo-next">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL HOST ===================== -->
+<div id="modal-host" class="modal-host hidden">
+  <div class="modal-backdrop" data-modal-close></div>
+  <div class="modal-card" id="modal-card"></div>
+</div>
+
+<!-- ===================== TOASTS ===================== -->
+<div id="toasts" class="toasts"></div>
+
+<script>
+// ============================================================
+// O.U.R.COOP — governance demo: mock data and state
+// Mirrors the real deployment: deposit → cUSD 1:1, sDAI yield →
+// Art Fund, queued proposals, 100-point ballots (1p1v),
+// cycle-gated claim & distribute (top-5, caps, min-viable floors).
+// ============================================================
+const STORAGE_KEY = 'ourcoop_demo_v1';
+const CYCLE_YIELD_RATE = 0.08;   // "advance time" adds one cycle of yield
+const TICK_RATE = 0.000035;      // slow passive accrual per 2s tick
+
+const ROLES = {
+  mira:  { id: 'mira',  name: 'Mira Calderón', short: 'Mira',  coordinator: true },
+  jules: { id: 'jules', name: 'Jules Renaud',  short: 'Jules', coordinator: false },
+};
+
+function defaultState() {
+  return {
+    currentRole: 'mira',
+    activeView: 'home',
+    cycle: 3,
+    cycleComplete: false,
+    pool: 18000,        // cooperative principal, held in sDAI, backs cUSD 1:1
+    yield: 312.4,       // accrued so far this cycle → the Art Fund
+    members: [
+      { id: 'mira',  name: 'Mira Calderón', joined: '2025-09-12', xdai: 6000, cusd: 4000, received: 0 },
+      { id: 'jules', name: 'Jules Renaud',  joined: '2025-11-03', xdai: 5000, cusd: 3500, received: 0 },
+      { id: 'm3', name: 'Diego López',    joined: '2026-01-22', xdai: 4000, cusd: 5000, received: 0 },
+      { id: 'm4', name: 'Naima Boutros',  joined: '2026-03-08', xdai: 3000, cusd: 2500, received: 0 },
+      { id: 'm5', name: 'Ola Bergström',  joined: '2026-04-19', xdai: 4500, cusd: 3000, received: 0 },
+    ],
+    projects: [
+      { id: 'p1', title: 'Mural at the old textile mill', proposerId: 'mira',  recipient: 'Mira Calderón', full: 900, minViable: 400, summary: 'Large-scale community mural; paint, scaffolding, food for volunteers.', status: 'active' },
+      { id: 'p2', title: 'Community theatre series',      proposerId: 'jules', recipient: 'Jules Renaud',  full: 600, minViable: 300, summary: 'Weekly performances at the riverside square; sound + costumes.', status: 'active' },
+      { id: 'p3', title: 'Photography zine, 200 copies',  proposerId: 'm3',    recipient: 'Diego López',   full: 240, minViable: 80,  summary: 'Print and bind a zine of estuary photography; distribute free.', status: 'active' },
+      { id: 'p4', title: 'Sculpture for the block plaza', proposerId: 'm4',    recipient: 'Naima Boutros', full: 480, minViable: 360, summary: 'Steel + concrete plinth piece for the plaza commission.', status: 'active' },
+      { id: 'p5', title: 'Weekend workshops for youth',   proposerId: 'm5',    recipient: 'Ola Bergström', full: 360, minViable: 160, summary: 'Three months of weekend painting workshops.', status: 'active' },
+      { id: 'p6', title: 'Print studio open hours',       proposerId: 'mira',  recipient: 'Mira Calderón', full: 300, minViable: 100, summary: 'Subsidize open studio hours; ink + plates.', status: 'queued' },
+    ],
+    // 100-point ballots cast THIS cycle, by member id — recasting replaces.
+    ballots: {
+      m3: { p1: 30, p3: 40, p5: 30 },
+      m4: { p4: 50, p1: 30, p2: 20 },
+      m5: { p5: 40, p2: 30, p3: 30 },
+    },
+    results: null, // last distribution result
+    transactions: [
+      { id: 't6', when: '2026-07-08 10:12', actor: 'Ola',   kind: 'ballot_cast',         text: 'Ola cast a 100-point ballot across 3 projects' },
+      { id: 't5', when: '2026-07-07 16:40', actor: 'Naima', kind: 'ballot_cast',         text: 'Naima cast a 100-point ballot across 3 projects' },
+      { id: 't4', when: '2026-07-06 09:15', actor: 'Diego', kind: 'ballot_cast',         text: 'Diego cast a 100-point ballot across 3 projects' },
+      { id: 't3', when: '2026-07-05 14:02', actor: 'Mira',  kind: 'proposal_registered', text: 'Registered "Print studio open hours" (full 300 cUSD, min viable 100 cUSD) — queued for the next cycle' },
+      { id: 't2', when: '2026-07-02 11:30', actor: 'system', kind: 'cycle_started',      text: 'Cycle 3 started — 5 proposals active' },
+      { id: 't1', when: '2026-07-01 09:00', actor: 'Diego', kind: 'deposit',             text: 'Deposited 5,000 xDAI → minted 5,000 cUSD' },
+    ],
+    nextIds: { project: 7, transaction: 7, member: 6 },
+  };
+}
+
+let STATE = (function() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && typeof s.pool === 'number' && Array.isArray(s.projects)) return s;
+    }
+  } catch (e) {}
+  return defaultState();
+})();
+
+function saveState() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch (e) {} }
+function resetState() { STATE = defaultState(); saveState(); }
+function getMember(id) { return STATE.members.find(m => m.id === id); }
+function memberName(id) { return getMember(id)?.name || id; }
+function role() { return ROLES[STATE.currentRole]; }
+function me() { return getMember(role().id); }
+function nextId(kind) { STATE.nextIds[kind] = (STATE.nextIds[kind] || 1) + 1; return STATE.nextIds[kind]; }
+function logTx(actor, kind, text) {
+  STATE.transactions.unshift({ id: 't' + nextId('transaction'), when: new Date().toISOString().replace('T',' ').slice(0,16), actor, kind, text });
+}
+function cusd(n) { if (typeof n !== 'number') n = Number(n) || 0; return Math.round(n).toLocaleString('en-US') + ' cUSD'; }
+function cusd2(n) { if (typeof n !== 'number') n = Number(n) || 0; return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' cUSD'; }
+function xdai(n) { if (typeof n !== 'number') n = Number(n) || 0; return Math.round(n).toLocaleString('en-US') + ' xDAI'; }
+function activeProjects() { return STATE.projects.filter(p => p.status === 'active'); }
+function queuedProjects() { return STATE.projects.filter(p => p.status === 'queued'); }
+function ballotCount() { return Object.keys(STATE.ballots).length; }
+function projectById(id) { return STATE.projects.find(p => p.id === id); }
+
+// ============================================================
+// App shell, routing, render, handlers
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('enter-app-btn').addEventListener('click', () => enterApp());
+  document.getElementById('start-demo-btn').addEventListener('click', () => { enterApp(); window.Demo.start(); });
+  document.getElementById('brand-home').addEventListener('click', (e) => { e.preventDefault(); go('home'); });
+  document.getElementById('restart-demo').addEventListener('click', () => window.Demo.start());
+  document.getElementById('reset-state').addEventListener('click', () => {
+    showModal({
+      title: 'Reset demo state?',
+      body: '<p>This restores the cooperative mock data to its starting state — deposits, proposals, ballots, everything.</p>',
+      actions: [
+        { label: 'Cancel', kind: 'ghost' },
+        { label: 'Reset', kind: 'danger', onClick: () => { resetState(); document.getElementById('role-select').value = STATE.currentRole; render(); toast('State reset', 'good'); } },
+      ]
+    });
+  });
+  document.getElementById('role-select').addEventListener('change', (e) => {
+    STATE.currentRole = e.target.value; saveState(); render();
+  });
+  document.querySelectorAll('[data-modal-close]').forEach(el => el.addEventListener('click', hideModal));
+  document.getElementById('role-select').value = STATE.currentRole;
+
+  // Slow, continuous sDAI yield accrual into the Art Fund.
+  setInterval(() => {
+    if (STATE.pool > 0) {
+      STATE.yield += STATE.pool * TICK_RATE;
+      saveState();
+      document.querySelectorAll('[data-yield-live]').forEach(n => { n.textContent = cusd2(STATE.yield); });
+    }
+  }, 2000);
+});
+
+function enterApp() {
+  document.getElementById('landing').classList.remove('active');
+  document.getElementById('app').classList.add('active');
+  render();
+}
+
+const VIEWS = [
+  ['home',         'Home'],
+  ['deposit',      'Deposit'],
+  ['projects',     'Projects & voting'],
+  ['distribution', 'Distribution'],
+  ['members',      'Members'],
+  ['ledger',       'Governance log'],
+];
+
+function go(view) {
+  const allowed = VIEWS.map(v => v[0]);
+  STATE.activeView = allowed.includes(view) ? view : 'home';
+  saveState(); render();
+}
+
+function render() {
+  renderTopnav();
+  renderTreasuryMini();
+  renderMain();
+}
+
+function renderTopnav() {
+  const nav = document.getElementById('topnav');
+  nav.innerHTML = VIEWS.map(([id, label]) =>
+    `<button data-view="${id}" class="${STATE.activeView === id ? 'active' : ''}">${label}</button>`
+  ).join('');
+  nav.querySelectorAll('button').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
+}
+
+function renderTreasuryMini() {
+  document.getElementById('treasury-mini').innerHTML =
+    `Pool <strong>${cusd(STATE.pool)}</strong> · Yield <strong data-yield-live>${cusd2(STATE.yield)}</strong>`;
+}
+
+function renderMain() {
+  const root = document.getElementById('main');
+  const v = STATE.activeView;
+  const fn = renderers[v] || renderers.home;
+  root.innerHTML = '';
+  root.appendChild(fn());
+}
+
+function el(html) {
+  const t = document.createElement('template');
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild;
+}
+function pageHead(kick, title, sub, rightHtml = '') {
+  return el(`<div class="page-head"><div><div class="kick">✳ ${kick}</div><h2>${title}</h2><div class="sub">${sub}</div></div><div>${rightHtml}</div></div>`);
+}
+
+function toast(text, kind = '') {
+  const t = el(`<div class="toast ${kind}"><span>${text}</span></div>`);
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2600);
+}
+
+function showModal({ title, body, actions = [] }) {
+  const host = document.getElementById('modal-host');
+  const card = document.getElementById('modal-card');
+  card.innerHTML = `<h3>${title}</h3><div>${body}</div><div class="actions">${actions.map((a,i)=>`<button class="btn ${a.kind || 'ghost'}" data-act="${i}">${a.label}</button>`).join('')}</div>`;
+  card.querySelectorAll('[data-act]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const a = actions[Number(btn.dataset.act)];
+      if (a && a.onClick) a.onClick();
+      hideModal();
+    });
+  });
+  host.classList.remove('hidden');
+}
+function hideModal() { document.getElementById('modal-host').classList.add('hidden'); }
+
+// ============================================================
+// Core actions: deposit, redeem, advance time, distribute
+// ============================================================
+function deposit(amount) {
+  const m = me();
+  if (!(amount > 0)) { toast('Enter an amount above zero', 'bad'); return; }
+  if (amount > m.xdai) { toast('Amount exceeds your xDAI balance', 'bad'); return; }
+  m.xdai -= amount;
+  m.cusd += amount;
+  STATE.pool += amount;
+  logTx(role().short, 'deposit', `${role().short} deposited ${xdai(amount)} → wrapped to WXDAI → minted ${cusd(amount)} 1:1`);
+  saveState(); render();
+  toast(`Minted ${cusd(amount)} — principal joined the pool`, 'good');
+}
+
+function redeem(amount) {
+  const m = me();
+  if (!(amount > 0)) { toast('Enter an amount above zero', 'bad'); return; }
+  if (amount > m.cusd) { toast('Amount exceeds your cUSD balance', 'bad'); return; }
+  m.cusd -= amount;
+  m.xdai += amount;
+  STATE.pool = Math.max(0, STATE.pool - amount);
+  logTx(role().short, 'redeem', `${role().short} redeemed ${cusd(amount)} → received ${xdai(amount)} (always 1:1)`);
+  saveState(); render();
+  toast(`Redeemed ${cusd(amount)} 1:1`, 'good');
+}
+
+function advanceTime() {
+  const gained = STATE.pool * CYCLE_YIELD_RATE;
+  STATE.yield += gained;
+  STATE.cycleComplete = true;
+  logTx('system', 'time_advanced', `⏩ Time advanced — cycle ${STATE.cycle} complete, ${cusd(gained)} of sDAI yield accrued to the Art Fund`);
+  saveState(); render();
+  toast(`Cycle ${STATE.cycle} complete — ${cusd(gained)} yield accrued`, 'info');
+}
+
+function canDistribute() {
+  const active = activeProjects();
+  if (!STATE.cycleComplete) return false;
+  if (active.length === 0) return queuedProjects().length > 0;
+  return ballotCount() > 0 && STATE.yield > 0;
+}
+
+function distribute() {
+  if (!canDistribute()) { toast('Distribution requirements not met', 'bad'); return; }
+  const active = activeProjects();
+  if (active.length) {
+    const result = tallyProjects(STATE.yield, active);
+    result.cycle = STATE.cycle;
+    STATE.results = result;
+    if (!result.failedAll) {
+      Object.entries(result.allocations).forEach(([pid, amt]) => {
+        const p = projectById(pid);
+        if (!p) return;
+        p.status = 'funded'; p.allocated = amt; p.decidedCycle = STATE.cycle;
+        mintTo(p.recipient, amt);
+        logTx('system', 'project_funded', `Funded "${p.title}" — minted ${cusd(amt)} directly to ${p.recipient} (one payout per round)`);
+      });
+      active.forEach(p => {
+        if (p.status === 'active') { p.status = 'notfunded'; p.decidedCycle = STATE.cycle; }
+      });
+      const distributed = Object.values(result.allocations).reduce((a,b)=>a+b,0);
+      STATE.pool += distributed;                       // claimed yield now backs the freshly minted cUSD
+      STATE.yield = Math.max(0, STATE.yield - distributed);
+      logTx('system', 'distribution', `Cycle ${STATE.cycle} round: claimed & distributed ${cusd(distributed)} across ${Object.keys(result.allocations).length} project(s)`);
+      toast(`Distributed ${cusd(distributed)}`, 'good');
+    } else {
+      active.forEach(p => { p.status = 'notfunded'; p.decidedCycle = STATE.cycle; });
+      logTx('system', 'distribution', `Cycle ${STATE.cycle} round: no project met its minimum-viable budget — yield carries over`);
+      toast('No project met its minimum — yield carries over', 'info');
+    }
+  }
+  advanceCycle();
+  saveState(); render();
+}
+
+function advanceCycle() {
+  STATE.cycle += 1;
+  STATE.cycleComplete = false;
+  STATE.ballots = {};
+  const queued = queuedProjects();
+  queued.forEach(p => { p.status = 'active'; });
+  if (queued.length) {
+    logTx('system', 'queue_processed', `Cycle ${STATE.cycle} started — queue processed, ${queued.length} proposal(s) activated; ballots reset`);
+  } else {
+    logTx('system', 'cycle_started', `Cycle ${STATE.cycle} started — ballots reset`);
+  }
+}
+
+function mintTo(recipientName, amount) {
+  const m = STATE.members.find(x => x.name === recipientName);
+  if (m) { m.cusd += amount; m.received += amount; }
+}
+
+// ============================================================
+// Tally — mirrors the on-chain CovaArtFundStrategy:
+// top-5 by points, proportional allocation with full-budget caps,
+// minimum-viable floors with iterative redistribution.
+// ============================================================
+function tallyProjects(fund, active) {
+  const points = {};
+  active.forEach(p => points[p.id] = 0);
+  Object.values(STATE.ballots).forEach(ballot => {
+    Object.entries(ballot).forEach(([pid, v]) => { if (pid in points) points[pid] += v; });
+  });
+  const ranked = active.map(p => ({ ...p, points: points[p.id] || 0 })).sort((a,b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    return a.minViable - b.minViable;
+  });
+  let pool = ranked.slice();
+  const topN = 5;
+  const iterations = [];
+  let safety = 0;
+  while (safety++ < 12) {
+    const top = pool.slice(0, topN);
+    if (!top.length) break;
+    const totalPts = top.reduce((a,b)=>a+b.points,0);
+    if (totalPts === 0) break;
+    const allocations = {};
+    let remaining = fund;
+    let live = top.map(t => ({ ...t }));
+    let safe2 = 0;
+    while (safe2++ < 12 && live.length) {
+      const totalLivePts = live.reduce((a,b)=>a+b.points,0);
+      if (totalLivePts === 0) break;
+      live.forEach(t => {
+        const share = (t.points / totalLivePts) * remaining;
+        const give = Math.min(share, t.full - (allocations[t.id] || 0));
+        allocations[t.id] = (allocations[t.id] || 0) + give;
+      });
+      const newLive = [];
+      let anyCapped = false;
+      live.forEach(t => {
+        if (Math.abs((allocations[t.id] || 0) - t.full) < 0.5) anyCapped = true;
+        else newLive.push(t);
+      });
+      const distributed = Object.values(allocations).reduce((a,b)=>a+b,0);
+      remaining = fund - distributed;
+      live = newLive;
+      if (!anyCapped || remaining <= 0.5) break;
+    }
+    Object.keys(allocations).forEach(k => allocations[k] = Math.round(allocations[k]));
+    const sum = Object.values(allocations).reduce((a,b)=>a+b,0);
+    if (sum !== fund && top.length) allocations[top[0].id] += (fund - sum);
+    const failing = top.filter(t => allocations[t.id] < t.minViable);
+    iterations.push({ topIds: top.map(t=>t.id), allocations: { ...allocations }, failing: failing.map(f=>f.id) });
+    if (!failing.length) return { ranked, top, allocations, iterations, fund };
+    const worst = failing.sort((a,b) => (allocations[a.id]/a.minViable) - (allocations[b.id]/b.minViable))[0];
+    pool = pool.filter(p => p.id !== worst.id);
+    if (pool.length < 1) break;
+  }
+  return { ranked, top: [], allocations: {}, iterations, fund, failedAll: true };
+}
+
+// ============================================================
+// Renderers
+// ============================================================
+const renderers = {};
+
+renderers.home = () => {
+  const m = me();
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(pageHead(
+    'Home',
+    `Hello, ${role().short}`,
+    `Deposit principal, register project proposals, cast your 100-point ballot, and distribute the Art Fund. One member, one vote.`
+  ));
+  wrap.appendChild(el(`
+    <div class="hero">
+      <div class="avatar">
+        <svg width="26" height="26" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><rect x="41" y="3" width="18" height="94" rx="2"/><rect x="41" y="3" width="18" height="94" rx="2" transform="rotate(60 50 50)"/><rect x="41" y="3" width="18" height="94" rx="2" transform="rotate(120 50 50)"/></g></svg>
+      </div>
+      <div>
+        <h3>${m.name} ${role().coordinator ? '<span class="badge warn">coordinator</span>' : ''}</h3>
+        <p>→ member since ${m.joined} · 1 vote, like everyone</p>
+      </div>
+      <div class="spacer"></div>
+      <div style="text-align:right;">
+        <div class="muted small">My cUSD (principal, redeemable 1:1)</div>
+        <div style="font-size:26px; font-weight:800;">${cusd(m.cusd)}</div>
+        <div class="muted small mt-8">Received from funding rounds: <strong>${cusd(m.received)}</strong></div>
+      </div>
+    </div>
+  `));
+  wrap.appendChild(el(`
+    <div class="grid cols-4">
+      <div class="metric accent"><div class="label">Cooperative pool (sDAI)</div><div class="value">${cusd(STATE.pool)}</div><div class="delta">principal, always redeemable</div></div>
+      <div class="metric accent"><div class="label">Art Fund yield</div><div class="value" data-yield-live>${cusd2(STATE.yield)}</div><div class="delta">accruing continuously</div></div>
+      <div class="metric"><div class="label">Active proposals</div><div class="value">${activeProjects().length}</div><div class="delta">${queuedProjects().length} queued for next cycle</div></div>
+      <div class="metric"><div class="label">Cycle ${STATE.cycle}</div><div class="value">${STATE.cycleComplete ? 'complete' : 'running'}</div><div class="delta">${ballotCount()} ballot(s) cast</div></div>
+    </div>
+  `));
+  wrap.appendChild(el(`
+    <div class="page-section">
+      <div class="section-title">✳ Quick actions</div>
+      <div class="grid cols-3">
+        <div class="card"><h4>Deposit principal</h4><div class="desc">Wrap xDAI → WXDAI and mint cUSD 1:1. Your principal joins the pooled sDAI; only the yield funds art.</div><div class="mt-12"><button class="btn primary small" id="qa-dep">Open deposit →</button></div></div>
+        <div class="card"><h4>Cast your ballot</h4><div class="desc">Split 100 points across the active projects — the total is capped at 100. Recasting replaces your previous ballot.</div><div class="mt-12"><button class="btn primary small" id="qa-vote">Open voting →</button></div></div>
+        <div class="card"><h4>Claim & distribute</h4><div class="desc">When the cycle completes with ballots cast and yield accrued, anyone can trigger the round: top-5 tally, direct payouts.</div><div class="mt-12"><button class="btn primary small" id="qa-dist">Open distribution →</button></div></div>
+      </div>
+    </div>
+  `));
+  wrap.querySelector('#qa-dep').addEventListener('click', () => go('deposit'));
+  wrap.querySelector('#qa-vote').addEventListener('click', () => go('projects'));
+  wrap.querySelector('#qa-dist').addEventListener('click', () => go('distribution'));
+  wrap.appendChild(el(`<div class="ast-sep">✳ ✳ ✳ ✳ ✳ ✳</div>`));
+  wrap.appendChild(el(`
+    <div class="card mt-12">
+      <h4>How the money flows</h4>
+      <div class="desc mt-8">→ Members deposit xDAI and mint cUSD 1:1 — that principal is pooled in sDAI and stays redeemable. → The pool's yield accrues into the Art Fund. → Each cycle, members vote with 100 points each and the yield is distributed straight to the winning projects' recipients. Principal is never spent.</div>
+    </div>
+  `));
+  return wrap;
+};
+
+renderers.deposit = () => {
+  const m = me();
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(pageHead(
+    'Deposit',
+    'Principal & yield',
+    'Wrap xDAI → WXDAI and mint cUSD 1:1. Pooled principal sits in sDAI and continuously accrues yield into the Art Fund. Principal is always redeemable 1:1.'
+  ));
+  wrap.appendChild(el(`<div class="grid cols-3"></div>`));
+  const grid = wrap.lastElementChild;
+  grid.appendChild(el(`
+    <div class="card">
+      <h4>How it works</h4>
+      <div class="kv"><span class="k">→ wrap</span><span class="v">xDAI → WXDAI</span></div>
+      <div class="kv"><span class="k">→ mint</span><span class="v">cUSD, exactly 1:1</span></div>
+      <div class="kv"><span class="k">→ pool</span><span class="v">principal held in sDAI</span></div>
+      <div class="kv"><span class="k">→ yield</span><span class="v">accrues to the Art Fund</span></div>
+      <div class="divider"></div>
+      <div class="muted small">Your principal is never spent on projects — only the yield is. Redeem any time, 1:1.</div>
+    </div>
+  `));
+  const wallet = el(`
+    <div class="card" id="deposit-card">
+      <h4>Your wallet — ${m.name}</h4>
+      <div class="kv"><span class="k">xDAI balance</span><span class="v">${xdai(m.xdai)}</span></div>
+      <div class="kv"><span class="k">cUSD balance</span><span class="v">${cusd(m.cusd)}</span></div>
+      <div class="divider"></div>
+      <div class="field"><label>Deposit (xDAI → cUSD)</label><input id="dep-amount" type="number" min="0" step="any" placeholder="0" value="500"></div>
+      <button class="btn primary" id="dep-btn">Deposit → mint cUSD</button>
+      <div class="divider"></div>
+      <div class="field"><label>Redeem (cUSD → xDAI, always 1:1)</label><input id="red-amount" type="number" min="0" step="any" placeholder="0"></div>
+      <button class="btn ghost" id="red-btn">Redeem 1:1 →</button>
+    </div>
+  `);
+  wallet.querySelector('#dep-btn').addEventListener('click', () => deposit(Number(wallet.querySelector('#dep-amount').value || 0)));
+  wallet.querySelector('#red-btn').addEventListener('click', () => redeem(Number(wallet.querySelector('#red-amount').value || 0)));
+  grid.appendChild(wallet);
+  const poolCard = el(`
+    <div class="card">
+      <h4>Cooperative pool</h4>
+      <div class="kv"><span class="k">Principal (sDAI)</span><span class="v">${cusd(STATE.pool)}</span></div>
+      <div class="kv"><span class="k">Accrued yield → Art Fund</span><span class="v" data-yield-live>${cusd2(STATE.yield)}</span></div>
+      <div class="kv"><span class="k">Cycle ${STATE.cycle}</span><span class="v">${STATE.cycleComplete ? 'complete ✓' : 'running'}</span></div>
+      <div class="divider"></div>
+      <button class="btn ghost" id="advance-time-2">⏩ Advance time</button>
+      <div class="muted small mt-8">Demo shortcut: adds a cycle's worth of yield (~${Math.round(CYCLE_YIELD_RATE*100)}% of the pool) and marks the cycle complete.</div>
+    </div>
+  `);
+  poolCard.querySelector('#advance-time-2').addEventListener('click', advanceTime);
+  grid.appendChild(poolCard);
+  return wrap;
+};
+
+renderers.projects = () => {
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(pageHead(
+    'Projects & voting',
+    'Projects & voting',
+    'Register a proposal — it queues and activates at the next cycle boundary. Then split your 100-point ballot across the active projects. Top 5 by points are funded from the yield, capped at full budgets, with minimum-viable floors.',
+    `<button class="btn primary" id="new-proj">+ Register proposal</button>`
+  ));
+  wrap.querySelector('#new-proj').addEventListener('click', () => openProposalModal());
+  wrap.appendChild(el(`<div class="section-title">✳ Your ballot — cycle ${STATE.cycle} · Art Fund <span data-yield-live>${cusd2(STATE.yield)}</span></div>`));
+  wrap.appendChild(renderVotingPanel());
+  wrap.appendChild(el(`<div class="section-title mt-24">✳ All proposals</div>`));
+  const list = el(`<div class="card" style="padding:0;"><table class="tbl"><thead><tr><th>Project</th><th>Recipient</th><th>Full</th><th>Min viable</th><th>Status</th></tr></thead><tbody></tbody></table></div>`);
+  const tb = list.querySelector('tbody');
+  STATE.projects.forEach(p => {
+    let status;
+    if (p.status === 'queued') status = '<span class="badge warn">queued → next cycle</span>';
+    else if (p.status === 'active') status = '<span class="badge info">active</span>';
+    else if (p.status === 'funded') status = `<span class="badge good">funded ${cusd(p.allocated)} · cycle ${p.decidedCycle}</span>`;
+    else status = `<span class="badge bad">not funded · cycle ${p.decidedCycle}</span>`;
+    tb.appendChild(el(`<tr><td><strong>${p.title}</strong><div class="muted small">${p.summary}</div><div class="muted small">→ proposed by ${memberName(p.proposerId)}</div></td><td>${p.recipient}</td><td>${cusd(p.full)}</td><td>${cusd(p.minViable)}</td><td>${status}</td></tr>`));
+  });
+  wrap.appendChild(list);
+  return wrap;
+};
+
+function openProposalModal() {
+  showModal({
+    title: 'Register project proposal',
+    body: `
+      <div class="field"><label>Title</label><input id="np-title" placeholder="A short title"></div>
+      <div class="field"><label>Summary</label><textarea id="np-summary" placeholder="What the project is, who it benefits, what it needs."></textarea></div>
+      <div class="field"><label>Recipient</label><input id="np-recipient" value="${role().name}" placeholder="Who receives the payout"></div>
+      <div class="field-row">
+        <div class="field"><label>Full budget (cUSD)</label><input id="np-full" type="number" value="600"></div>
+        <div class="field"><label>Min viable (cUSD)</label><input id="np-min" type="number" value="250"></div>
+      </div>
+      <div class="hint">New proposals are queued and activate at the next cycle boundary. If a round's allocation falls below the minimum viable, the project is dropped and its share is redistributed.</div>
+    `,
+    actions: [
+      { label: 'Cancel', kind: 'ghost' },
+      { label: 'Register', kind: 'primary', onClick: () => {
+        const title = document.getElementById('np-title').value || 'Untitled proposal';
+        const summary = document.getElementById('np-summary').value || '—';
+        const recipient = document.getElementById('np-recipient').value || role().name;
+        const full = Number(document.getElementById('np-full').value || 500);
+        const minViable = Number(document.getElementById('np-min').value || Math.round(full * .4));
+        if (minViable > full) { toast('Minimum viable cannot exceed full budget', 'bad'); return; }
+        const id = 'p' + nextId('project');
+        STATE.projects.push({ id, title, summary, recipient, proposerId: role().id, full, minViable, status: 'queued' });
+        logTx(role().short, 'proposal_registered', `Registered "${title}" (full ${cusd(full)}, min viable ${cusd(minViable)}) — queued for the next cycle`);
+        saveState(); render();
+        toast('Proposal registered — queued for the next cycle', 'good');
+      } }
+    ]
+  });
+}
+
+function renderVotingPanel() {
+  const card = el(`<div class="card"></div>`);
+  const active = activeProjects();
+  if (!active.length) {
+    const q = queuedProjects().length;
+    card.innerHTML = `<div class="empty">No active proposals this cycle.${q ? ` ${q} queued proposal(s) will activate when the next cycle starts (on distribution).` : ' Register one — it activates at the next cycle boundary.'}</div>`;
+    return card;
+  }
+  const myBallot = STATE.ballots[role().id] || {};
+  card.innerHTML = `
+    <div class="spread">
+      <div>
+        <h4>Split your 100 points</h4>
+        <div class="muted small">One member, one ballot — equal power regardless of balance. The total is capped at 100. Recasting replaces your previous ballot this cycle.</div>
+      </div>
+      <div class="right">
+        <div class="muted small">Art Fund (accrued yield)</div>
+        <div style="font-size:20px; font-weight:800;" data-yield-live>${cusd2(STATE.yield)}</div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div id="point-rows"></div>
+    <div class="spread mt-12">
+      <div>Points used: <strong id="points-used">0</strong> / 100 · <span class="muted small">${ballotCount()} member ballot(s) cast this cycle</span></div>
+      <div class="flex gap-8">
+        <button class="btn ghost small" id="reset-points">Clear</button>
+        <button class="btn primary" id="cast-ballot">${myBallot && Object.keys(myBallot).length ? 'Recast ballot' : 'Cast ballot'}</button>
+      </div>
+    </div>
+  `;
+  const rows = card.querySelector('#point-rows');
+  active.forEach(p => {
+    const preset = Number(myBallot[p.id] || 0);
+    const row = el(`
+      <div class="pt-slider" data-pid="${p.id}">
+        <div>
+          <strong>${p.title}</strong>
+          <div class="pt-meta">→ ${p.recipient} · full ${cusd(p.full)} · min viable ${cusd(p.minViable)}</div>
+        </div>
+        <input type="number" min="0" max="100" value="${preset}" class="pt-num">
+        <input type="range" min="0" max="100" value="${preset}" class="pt-range">
+      </div>
+    `);
+    rows.appendChild(row);
+    const num = row.querySelector('.pt-num');
+    const range = row.querySelector('.pt-range');
+    const sync = (src) => {
+      let v = Number(src.value || 0);
+      const others = Array.from(rows.querySelectorAll('.pt-num')).filter(n => n !== num).map(n => Number(n.value||0)).reduce((a,b)=>a+b,0);
+      if (others + v > 100) v = 100 - others;
+      if (v < 0) v = 0;
+      num.value = v; range.value = v;
+      updatePointsUsed();
+    };
+    num.addEventListener('input', () => sync(num));
+    range.addEventListener('input', () => sync(range));
+  });
+  function updatePointsUsed() {
+    const used = Array.from(rows.querySelectorAll('.pt-num')).map(n => Number(n.value||0)).reduce((a,b)=>a+b,0);
+    card.querySelector('#points-used').textContent = used;
+  }
+  updatePointsUsed();
+  card.querySelector('#reset-points').addEventListener('click', () => {
+    rows.querySelectorAll('.pt-num').forEach(n => n.value = 0);
+    rows.querySelectorAll('.pt-range').forEach(n => n.value = 0);
+    updatePointsUsed();
+  });
+  card.querySelector('#cast-ballot').addEventListener('click', () => {
+    const myVotes = {};
+    let total = 0;
+    rows.querySelectorAll('.pt-slider').forEach(r => {
+      const pid = r.dataset.pid;
+      const v = Number(r.querySelector('.pt-num').value || 0);
+      if (v > 0) { myVotes[pid] = v; total += v; }
+    });
+    if (!total) { toast('Assign at least 1 point', 'bad'); return; }
+    if (total > 100) { toast('Ballot exceeds 100 points', 'bad'); return; }
+    const replacing = !!(STATE.ballots[role().id] && Object.keys(STATE.ballots[role().id]).length);
+    STATE.ballots[role().id] = myVotes;
+    logTx(role().short, 'ballot_cast', `${role().short} cast a 100-point ballot (${total} points across ${Object.keys(myVotes).length} project(s))${replacing ? ' — replaced previous ballot' : ''}`);
+    saveState(); render();
+    toast(replacing ? 'Ballot replaced' : 'Ballot cast', 'good');
+  });
+  return card;
+}
+
+renderers.distribution = () => {
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(pageHead(
+    'Distribution',
+    'Claim & distribute',
+    'Cycle-gated: when the cycle completes with at least one ballot cast and yield accrued, anyone can trigger the round. Yield is minted straight to the funded projects’ recipients — one payout per round. Then the cycle advances, ballots reset, and queued proposals activate.'
+  ));
+  const active = activeProjects();
+  const queued = queuedProjects();
+  const ready = canDistribute();
+  const checksCard = el(`<div class="card" id="readiness"></div>`);
+  const check = (ok, label, hint) => `
+    <div class="check-row">
+      <span class="ok ${ok ? 'yes' : 'no'}">${ok ? '✓' : '✗'}</span>
+      <span>${label}</span>
+      <span class="hint">${hint}</span>
+    </div>`;
+  let checksHtml = `<div class="spread"><h4>Round readiness — cycle ${STATE.cycle}</h4><span class="badge ${ready ? 'good' : 'warn'}">${ready ? 'ready' : 'not ready'}</span></div><div class="divider"></div>`;
+  checksHtml += check(STATE.cycleComplete, 'Cycle complete', STATE.cycleComplete ? 'boundary reached' : 'press ⏩ Advance time');
+  if (active.length) {
+    checksHtml += check(ballotCount() > 0, `Ballots cast this cycle: ${ballotCount()}`, 'at least one member ballot required');
+    checksHtml += check(STATE.yield > 0, `Accrued yield: <strong data-yield-live>${cusd2(STATE.yield)}</strong>`, 'on-chain: ≥ 1 wei per active project');
+  } else {
+    checksHtml += check(queued.length > 0, `No active proposals — ${queued.length} queued`, 'distributing just processes the queue');
+  }
+  checksHtml += `
+    <div class="divider"></div>
+    <div class="flex gap-8">
+      <button class="btn ghost" id="advance-time">⏩ Advance time</button>
+      <button class="btn primary" id="claim-distribute" ${ready ? '' : 'disabled'}>${active.length ? 'Claim & distribute →' : 'Process queue & start next cycle →'}</button>
+    </div>
+    <div class="muted small mt-8">${active.length} active project(s) · ${queued.length} queued will activate when the cycle advances.</div>`;
+  checksCard.innerHTML = checksHtml;
+  checksCard.querySelector('#advance-time').addEventListener('click', advanceTime);
+  checksCard.querySelector('#claim-distribute').addEventListener('click', distribute);
+
+  const howCard = el(`
+    <div class="card">
+      <h4>How the tally works</h4>
+      <div class="kv"><span class="k">→ rank</span><span class="v">active projects by total points</span></div>
+      <div class="kv"><span class="k">→ top 5</span><span class="v">enter the round</span></div>
+      <div class="kv"><span class="k">→ allocate</span><span class="v">yield proportional to points</span></div>
+      <div class="kv"><span class="k">→ cap</span><span class="v">nobody gets more than full budget</span></div>
+      <div class="kv"><span class="k">→ floor</span><span class="v">below min viable → dropped, share redistributed</span></div>
+      <div class="kv"><span class="k">→ repeat</span><span class="v">until every funded project is viable</span></div>
+      <div class="divider"></div>
+      <div class="muted small">Same algorithm as the on-chain Art Fund strategy. Payouts are minted directly to recipients — no streams.</div>
+    </div>
+  `);
+  wrap.appendChild(el(`<div class="grid cols-2"></div>`));
+  const grid = wrap.lastElementChild;
+  grid.appendChild(checksCard);
+  grid.appendChild(howCard);
+
+  wrap.appendChild(el(`<div class="section-title mt-24">✳ Last round result</div>`));
+  const resCard = el(`<div class="card"><div id="tally-result"></div></div>`);
+  if (STATE.results) renderTallyResult(resCard.querySelector('#tally-result'), STATE.results);
+  else resCard.querySelector('#tally-result').innerHTML = '<div class="empty">No round has run yet. Complete the cycle, make sure a ballot is cast, and press "Claim & distribute".</div>';
+  wrap.appendChild(resCard);
+  return wrap;
+};
+
+function renderTallyResult(root, result) {
+  if (!result) { root.innerHTML = ''; return; }
+  if (result.failedAll) { root.innerHTML = `<div class="empty">Cycle ${result.cycle}: no project could meet its minimum viable budget. The yield carried over to the next round.</div>`; return; }
+  const top = result.top;
+  const allocs = result.allocations;
+  let html = `<div class="section-title">✳ Final allocation — cycle ${result.cycle} · fund ${cusd(result.fund)}</div>`;
+  html += '<div class="tally-row head"><div>Project</div><div>Points</div><div>Share</div><div>Allocation</div><div>Min viable</div><div>Status</div></div>';
+  const totalPts = top.reduce((a,b)=>a+b.points,0);
+  top.forEach(t => {
+    const share = totalPts ? ((t.points/totalPts)*100).toFixed(1) : '0';
+    const ok = allocs[t.id] >= t.minViable;
+    html += `<div class="tally-row">
+      <div class="nm"><strong>${t.title}</strong><span class="muted small">→ ${t.recipient}</span></div>
+      <div>${t.points}</div>
+      <div>${share}%</div>
+      <div><strong>${cusd(allocs[t.id])}</strong></div>
+      <div>${cusd(t.minViable)}</div>
+      <div class="status"><span class="badge ${ok?'good':'bad'}">${ok?'funded':'below min'}</span></div>
+    </div>`;
+  });
+  if (result.iterations && result.iterations.length > 1) {
+    html += '<div class="section-title mt-16">✳ Redistribution log</div>';
+    result.iterations.forEach((it, idx) => {
+      const fail = it.failing.map(id => projectById(id)?.title || id).join(', ') || 'none';
+      html += `<div class="kv"><span class="k">Iteration ${idx+1}</span><span class="v small">${fail==='none' ? 'all viable ✓' : 'below min: ' + fail + ' → worst dropped, shares recomputed'}</span></div>`;
+    });
+  }
+  html += `<div class="muted small mt-12">→ Each funded project's recipient was minted cUSD directly — one payout per round.</div>`;
+  root.innerHTML = html;
+}
+
+renderers.members = () => {
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(pageHead(
+    'Members',
+    'Members — one person, one vote',
+    'Every member holds exactly one vote, regardless of how much they deposited. The coordinator admits new members.'
+  ));
+  const panel = el(`<div class="card" id="members-panel" style="padding:0;"><table class="tbl"><thead><tr><th>Member</th><th>Joined</th><th>cUSD balance</th><th>Received from rounds</th><th>Voting power</th></tr></thead><tbody></tbody></table></div>`);
+  const tb = panel.querySelector('tbody');
+  STATE.members.forEach(m => {
+    const isCoordinator = Object.values(ROLES).some(r => r.coordinator && r.id === m.id);
+    tb.appendChild(el(`<tr>
+      <td><strong>${m.name}</strong> ${isCoordinator ? '<span class="badge warn">coordinator</span>' : ''}</td>
+      <td class="muted small">→ ${m.joined}</td>
+      <td>${cusd(m.cusd)}</td>
+      <td>${cusd(m.received)}</td>
+      <td><span class="badge info">1 vote</span></td>
+    </tr>`));
+  });
+  wrap.appendChild(panel);
+  const isCoord = !!role().coordinator;
+  const addCard = el(`
+    <div class="card mt-16">
+      <h4>Add a member</h4>
+      <div class="desc">On-chain, the coordinator calls <strong>POWER.addMembers</strong> — each new member receives exactly one vote of non-transferable voting power.</div>
+      <div class="field mt-12"><label>New member name</label><input id="add-member-input" placeholder="e.g. Sara Krstić" ${isCoord ? '' : 'disabled'}></div>
+      <button class="btn primary" id="add-member-btn" ${isCoord ? '' : 'disabled'}>+ Add member</button>
+      ${isCoord ? '' : `<div class="muted small mt-8">Only the coordinator can add members — switch to Mira (coordinator) to try it.</div>`}
+    </div>
+  `);
+  addCard.querySelector('#add-member-btn').addEventListener('click', () => {
+    const input = addCard.querySelector('#add-member-input');
+    const name = (input.value || '').trim();
+    if (!name) { toast('Enter a name', 'bad'); return; }
+    if (STATE.members.some(m => m.name === name)) { toast('Already a member', 'bad'); return; }
+    STATE.members.push({ id: 'm' + nextId('member'), name, joined: new Date().toISOString().slice(0,10), xdai: 5000, cusd: 0, received: 0 });
+    logTx(role().short, 'member_added', `Coordinator added ${name} — on-chain: POWER.addMembers, 1 vote of power`);
+    saveState(); render();
+    toast(`${name} added — 1 vote, like everyone`, 'good');
+  });
+  wrap.appendChild(addCard);
+  return wrap;
+};
+
+renderers.ledger = () => {
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(pageHead(
+    'Governance log',
+    'Governance log',
+    'Every deposit, proposal, ballot, distribution and membership change — newest first.'
+  ));
+  const card = el(`<div class="card" id="ledger-table" style="padding:0;"><table class="tbl"><thead><tr><th>When</th><th>Actor</th><th>Kind</th><th>Detail</th></tr></thead><tbody></tbody></table></div>`);
+  const tb = card.querySelector('tbody');
+  STATE.transactions.forEach(t => tb.appendChild(el(`<tr><td class="muted small">→ ${t.when}</td><td>${t.actor}</td><td><span class="badge info">${t.kind}</span></td><td>${t.text}</td></tr>`)));
+  wrap.appendChild(card);
+  return wrap;
+};
+
+// ============================================================
+// Guided tour
+// ============================================================
+(function () {
+  const overlay = document.getElementById('demo-overlay');
+  const spot    = document.getElementById('demo-spot');
+  const card    = document.getElementById('demo-card');
+  const elTitle = document.getElementById('demo-title');
+  const elText  = document.getElementById('demo-text');
+  const elLabel = document.getElementById('demo-step-label');
+  const btnNext = document.getElementById('demo-next');
+  const btnBack = document.getElementById('demo-back');
+  const btnClose= document.getElementById('demo-close');
+
+  let stepIndex = 0;
+
+  const steps = [
+    {
+      title: '✳ Welcome to O.U.R.COOP',
+      text: 'This demo mirrors the real cooperative app: deposit principal, register project proposals, cast a 100-point ballot, and distribute the yield-funded Art Fund. One member, one vote. Nothing here is real — play freely.',
+      role: 'mira', view: 'home',
+      target: '.brand-mini',
+    },
+    {
+      title: 'Deposit & principal',
+      text: 'Members wrap xDAI → WXDAI and mint cUSD 1:1. Principal joins the cooperative pool, held in sDAI, and stays redeemable 1:1 at any time. Only the pool’s yield funds art — watch it tick up. A 500 deposit is pre-filled; Next submits it for Mira.',
+      role: 'mira', view: 'deposit',
+      target: '#deposit-card',
+      onEnter: () => {
+        const a = document.getElementById('dep-amount'); if (a) a.value = 500;
+      },
+      onLeave: () => { document.getElementById('dep-btn')?.click(); },
+    },
+    {
+      title: 'Projects & the queue',
+      text: 'Any member registers a proposal: title, summary, recipient, full budget and minimum-viable budget, in cUSD. New proposals are QUEUED and activate at the next cycle boundary. The form is pre-filled — Next registers it.',
+      role: 'mira', view: 'projects',
+      target: '#new-proj',
+      onEnter: () => {
+        setTimeout(() => document.getElementById('new-proj')?.click(), 150);
+        setTimeout(() => {
+          const t = document.getElementById('np-title'); if (t) t.value = 'Public art audio tour';
+          const s = document.getElementById('np-summary'); if (s) s.value = 'Self-guided audio tour of cooperative-funded artworks around the city.';
+          const r = document.getElementById('np-recipient'); if (r) r.value = 'Mira Calderón';
+          const f = document.getElementById('np-full'); if (f) f.value = 550;
+          const m = document.getElementById('np-min'); if (m) m.value = 200;
+        }, 350);
+      },
+      onLeave: () => {
+        const submit = Array.from(document.querySelectorAll('.modal-card .actions .btn.primary')).pop();
+        if (submit) submit.click();
+      },
+    },
+    {
+      title: 'Your 100-point ballot',
+      text: 'Each member gets one 100-point ballot per cycle, split any way across the ACTIVE projects — the total is capped at 100. Equal power regardless of balance, and recasting replaces your previous ballot. Next casts this ballot for Mira.',
+      role: 'mira', view: 'projects',
+      target: '#point-rows',
+      onEnter: () => {
+        const dist = [40, 25, 10, 15, 10];
+        const nums = document.querySelectorAll('#point-rows .pt-num');
+        const ranges = document.querySelectorAll('#point-rows .pt-range');
+        let total = 0;
+        nums.forEach((n, i) => { const v = dist[i] != null ? dist[i] : 0; n.value = v; if (ranges[i]) ranges[i].value = v; total += v; });
+        const u = document.getElementById('points-used'); if (u) u.textContent = total;
+      },
+      onLeave: () => { document.getElementById('cast-ballot')?.click(); },
+    },
+    {
+      title: 'Distribution readiness',
+      text: 'The round is cycle-gated: (1) the cycle must be complete, (2) at least one ballot cast, (3) yield accrued — on-chain that’s at least a wei per active project. We just pressed ⏩ Advance time for you: a cycle’s worth of yield arrived and the cycle is complete.',
+      role: 'mira', view: 'distribution',
+      target: '#readiness',
+      onEnter: () => {
+        setTimeout(() => { if (!STATE.cycleComplete) document.getElementById('advance-time')?.click(); }, 150);
+      },
+    },
+    {
+      title: 'Claim & distribute',
+      text: 'The tally ranks active projects by points and funds the top 5 proportionally, capped at each full budget. Anything below its minimum-viable budget is dropped and its share redistributed — iteratively, until every funded project is viable. Next runs the round.',
+      role: 'mira', view: 'distribution',
+      target: '#claim-distribute',
+      onLeave: () => { document.getElementById('claim-distribute')?.click(); },
+    },
+    {
+      title: 'The result — direct payouts',
+      text: 'Each funded project’s recipient was minted cUSD directly — one payout per round, no streams. The redistribution log shows any project that fell below its minimum and got dropped. The cycle advanced: ballots reset and queued proposals became active.',
+      role: 'mira', view: 'distribution',
+      target: '#tally-result',
+    },
+    {
+      title: 'Members — one person, one vote',
+      text: 'Every member holds exactly one vote, whatever they deposited. The coordinator admits new members — on-chain that’s POWER.addMembers. Try the add-member field after the tour (as Mira, the coordinator).',
+      role: 'mira', view: 'members',
+      target: '#members-panel',
+    },
+    {
+      title: 'The governance log',
+      text: 'Every deposit, proposal, ballot, distribution and membership change lands here, newest first — the cooperative’s memory.',
+      role: 'mira', view: 'ledger',
+      target: '#ledger-table',
+    },
+    {
+      title: '✳ That’s the whole loop',
+      text: 'Deposit → propose → ballot → claim & distribute → repeat, with principal always redeemable 1:1. Explore freely, hit ⟳ Reset to start over — or head to the real app on Gnosis via the footer link.',
+      role: 'mira', view: 'home',
+      target: '.brand-mini',
+    },
+  ];
+
+  function setRoleAndView(roleId, viewId) {
+    const changed = (STATE.currentRole !== roleId) || (STATE.activeView !== viewId);
+    if (STATE.currentRole !== roleId) {
+      STATE.currentRole = roleId;
+      document.getElementById('role-select').value = roleId;
+    }
+    STATE.activeView = viewId;
+    saveState();
+    if (changed) render();
+  }
+
+  function placeSpotlight(selector) {
+    if (!selector) { spot.classList.remove('active'); return; }
+    let target = null;
+    document.querySelectorAll(selector).forEach(e => {
+      if (target) return;
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) target = e;
+    });
+    if (!target) { spot.classList.remove('active'); return; }
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const r = target.getBoundingClientRect();
+    const pad = 8;
+    spot.style.top  = (r.top + window.scrollY - pad) + 'px';
+    spot.style.left = (r.left + window.scrollX - pad) + 'px';
+    spot.style.width = (r.width + pad*2) + 'px';
+    spot.style.height= (r.height + pad*2) + 'px';
+    spot.classList.add('active');
+    const cardW = 380;
+    const vpW = window.innerWidth;
+    let left = r.right + window.scrollX + 20;
+    if (left + cardW > vpW - 16) left = Math.max(16, r.left + window.scrollX - cardW - 20);
+    if (left < 16) left = 16;
+    let top = r.top + window.scrollY;
+    const cardH = card.offsetHeight || 220;
+    if (top + cardH > window.scrollY + window.innerHeight - 16) top = window.scrollY + window.innerHeight - cardH - 16;
+    if (top < window.scrollY + 16) top = window.scrollY + 16;
+    card.style.left = left + 'px';
+    card.style.top  = top + 'px';
+  }
+
+  function showStep(i) {
+    if (i < 0) i = 0;
+    if (i >= steps.length) i = steps.length - 1;
+    stepIndex = i;
+    const s = steps[i];
+    if (s.role && s.view) setRoleAndView(s.role, s.view);
+    elTitle.textContent = s.title;
+    elText.textContent = s.text;
+    elLabel.textContent = `Step ${i+1} / ${steps.length}`;
+    btnBack.disabled = i === 0;
+    btnNext.textContent = (i === steps.length - 1) ? 'Finish' : 'Next →';
+    setTimeout(() => {
+      try { if (s.onEnter) s.onEnter(); } catch(e) { console.warn('tour onEnter', e); }
+      setTimeout(() => placeSpotlight(s.target), 250);
+    }, 60);
+  }
+
+  function next() {
+    const s = steps[stepIndex];
+    try { if (s && s.onLeave) s.onLeave(); } catch(e) { console.warn('tour onLeave', e); }
+    if (stepIndex === steps.length - 1) { end(); return; }
+    setTimeout(() => showStep(stepIndex + 1), 250);
+  }
+  function back() { if (stepIndex === 0) return; showStep(stepIndex - 1); }
+  function start() {
+    overlay.classList.remove('hidden');
+    if (!document.getElementById('app').classList.contains('active')) {
+      document.getElementById('landing').classList.remove('active');
+      document.getElementById('app').classList.add('active');
+    }
+    showStep(0);
+  }
+  function end() {
+    overlay.classList.add('hidden');
+    spot.classList.remove('active');
+  }
+
+  btnNext.addEventListener('click', next);
+  btnBack.addEventListener('click', back);
+  btnClose.addEventListener('click', end);
+  window.addEventListener('resize', () => { const s = steps[stepIndex]; if (s) placeSpotlight(s.target); });
+  window.addEventListener('scroll', () => { const s = steps[stepIndex]; if (s) placeSpotlight(s.target); });
+
+  window.Demo = { start, end, next, back };
+})();
+</script>
+</body>
+</html>

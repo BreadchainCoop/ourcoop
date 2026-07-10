@@ -3,9 +3,8 @@ import { DappNav } from "@/components/dapp/dapp-nav";
 import { InstanceHeaderBanner } from "@/components/dapp/instance-branding";
 
 export const metadata: Metadata = {
-  title: "Crowdstaking — App",
-  description:
-    "Deposit, vote, and distribute community yield on the Crowdstaking protocol.",
+  title: "O.U.R.COOP — App",
+  description: "Deposit, vote, and distribute cooperative yield on O.U.R.COOP.",
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
