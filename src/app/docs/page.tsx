@@ -16,6 +16,10 @@ import {
   Users,
   Wallet,
   ChartBar,
+  Eye,
+  Sliders,
+  Scales,
+  ClockCounterClockwise,
 } from "@phosphor-icons/react";
 import { CHAINS, DEFAULT_CHAIN_ID, addressUrl } from "@/lib/chains";
 
@@ -31,6 +35,8 @@ const gif = (name: string) => `${BASE}/docs/${name}`;
 type Flow = {
   id: string;
   n: number;
+  /** Caption prefix — defaults to "Step" (the protocol walkthrough). */
+  kicker?: string;
   icon: ReactNode;
   title: string;
   blurb: string;
@@ -166,6 +172,104 @@ const FLOWS: Flow[] = [
   },
 ];
 
+/**
+ * The cooperative app (/coop) — recorded end-to-end against a fork of the
+ * live Sepolia deployment with a member wallet, so every click, transaction,
+ * and state change in these GIFs is the real system reacting.
+ */
+const COOP_FLOWS: Flow[] = [
+  {
+    id: "coop-browse",
+    n: 1,
+    kicker: "Coop",
+    icon: <Eye weight="duotone" />,
+    title: "Browse the cooperative",
+    blurb:
+      "The whole cooperative is readable without a wallet: the four funds and the Art Fund, every project with its budgets and live ballot tallies, withdrawal proposals, and the on-chain activity log.",
+    steps: [
+      "Open /coop — the home view loads the live state straight from the chain.",
+      "Funds shows the Reserve, Education, Solidarity, and Production balances plus the Art Fund pool.",
+      "Projects & voting lists every project with full and minimum-viable budgets and current points.",
+    ],
+    media: "coop-browse.gif",
+  },
+  {
+    id: "coop-connect",
+    n: 2,
+    kicker: "Coop",
+    icon: <Plugs weight="duotone" />,
+    title: "Connect as a member",
+    blurb:
+      "Acting requires a member wallet on Sepolia — one member, one vote, regardless of balance. The coordinator adds members on-chain; everyone else keeps read-only access.",
+    steps: [
+      "Click Connect wallet — the app switches your wallet to Sepolia if needed.",
+      "The read-only banner disappears once a member wallet is connected.",
+      "Non-member wallets can still browse everything live.",
+    ],
+    media: "coop-connect.gif",
+  },
+  {
+    id: "coop-vote",
+    n: 3,
+    kicker: "Coop",
+    icon: <Sliders weight="duotone" />,
+    title: "Cast a 100-point ballot",
+    blurb:
+      "Each member gets exactly 100 points per funding cycle to spread across projects — the total is capped, and recasting within a cycle replaces the previous ballot.",
+    steps: [
+      "Open Projects & voting and distribute points with the sliders or number fields.",
+      "The counter enforces the 100-point cap across all projects.",
+      "Cast ballot signs one transaction; the live tallies update as it lands.",
+    ],
+    media: "coop-vote.gif",
+  },
+  {
+    id: "coop-round",
+    n: 4,
+    kicker: "Coop",
+    icon: <HandCoins weight="duotone" />,
+    title: "Run a funding round",
+    blurb:
+      "When the cycle completes with ballots cast and yield accrued, anyone can trigger the round: the Art Fund is shared among the top 5 projects by points, capped at full budgets, with minimum-viable floors — under-floor projects are dropped and their share redistributed.",
+    steps: [
+      "The cycle banner shows readiness: cycle complete, ballots cast, yield accrued.",
+      "Run funding round executes claim-and-distribute in one transaction.",
+      "Funded amounts are minted straight to each project's payout address and the cycle advances.",
+    ],
+    media: "coop-round.gif",
+  },
+  {
+    id: "coop-withdrawal",
+    n: 5,
+    kicker: "Coop",
+    icon: <Scales weight="duotone" />,
+    title: "Propose & vote a withdrawal",
+    blurb:
+      "The four dedicated funds are governed by member votes: anyone can propose a draw with a recipient and purpose, members vote for or against, and a majority of cast votes approves.",
+    steps: [
+      "Fill in the source fund, amount, recipient, and purpose, then propose.",
+      "Members vote For or Against — one vote each, tracked on-chain.",
+      "Close & tally settles the proposal; approved draws move the funds.",
+    ],
+    media: "coop-withdrawal.gif",
+  },
+  {
+    id: "coop-activity",
+    n: 6,
+    kicker: "Coop",
+    icon: <ClockCounterClockwise weight="duotone" />,
+    title: "Audit the activity log",
+    blurb:
+      "Every token movement and governance event — ballots, funded projects, rounds, withdrawal proposals and votes — is reconstructed from on-chain events, newest first.",
+    steps: [
+      "Token movements show fund-to-fund and fund-to-recipient transfers with amounts and notes.",
+      "The governance log lists every ballot, round, and withdrawal decision.",
+      "Everything links back to the chain — nothing here is off-chain bookkeeping.",
+    ],
+    media: "coop-activity.gif",
+  },
+];
+
 const SYSTEM = [
   ["Project token (CSTAKE)", ADDRESSES.token],
   ["Distribution manager", ADDRESSES.distributionManager],
@@ -211,14 +315,14 @@ export default function DocsPage() {
         <div className="border-paper-2 bg-paper-0 rounded-2xl border p-5">
           <Caption className="text-surface-grey-2">On this page</Caption>
           <ol className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-            {FLOWS.map((f) => (
+            {[...FLOWS, ...COOP_FLOWS].map((f) => (
               <li key={f.id}>
                 <a
                   href={`#${f.id}`}
                   className="text-text-standard hover:text-core-orange flex items-center gap-2 text-sm font-medium transition-colors"
                 >
                   <span className="bg-core-orange/10 text-core-orange inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold">
-                    {f.n}
+                    {f.kicker ? "✳" : f.n}
                   </span>
                   {f.title}
                 </a>
@@ -248,6 +352,30 @@ export default function DocsPage() {
       <main className="section-container space-y-20 pb-24">
         {FLOWS.map((f, i) => (
           <FlowSection key={f.id} flow={f} eager={i === 0} />
+        ))}
+
+        {/* Cooperative app */}
+        <section id="coop-app" className="scroll-mt-20">
+          <Caption className="text-core-orange font-semibold tracking-wide uppercase">
+            ✳ The cooperative app
+          </Caption>
+          <h2 className="font-breadDisplay text-text-standard mt-2 text-4xl font-extrabold tracking-tight">
+            Governing O.U.R.COOP
+          </h2>
+          <Body className="text-surface-grey-2 mt-3 max-w-2xl">
+            The cooperative&apos;s own governance interface at{" "}
+            <Link href="/coop" className="text-core-orange hover:underline">
+              /coop
+            </Link>{" "}
+            — funds, project ballots, funding rounds, and withdrawal votes.
+            These recordings were driven end to end against a fork of the live
+            Sepolia deployment with a member wallet: every transaction and state
+            change shown is the real system reacting.
+          </Body>
+        </section>
+
+        {COOP_FLOWS.map((f) => (
+          <FlowSection key={f.id} flow={f} />
         ))}
 
         {/* Live system */}
@@ -345,7 +473,7 @@ function FlowSection({ flow, eager }: { flow: Flow; eager?: boolean }) {
           {flow.icon}
         </span>
         <Caption className="text-surface-grey font-semibold">
-          Step {flow.n}
+          {flow.kicker ?? "Step"} {flow.n}
         </Caption>
       </div>
       <h2 className="font-breadDisplay text-text-standard mt-2 text-3xl font-extrabold tracking-tight">
@@ -371,7 +499,7 @@ function FlowSection({ flow, eager }: { flow: Flow; eager?: boolean }) {
             <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
             <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
             <Caption className="text-surface-grey ml-3 truncate">
-              crowdstake.fun — {flow.title}
+              O.U.R.COOP — {flow.title}
             </Caption>
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}

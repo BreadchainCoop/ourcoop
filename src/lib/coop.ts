@@ -16,8 +16,13 @@ import { sepolia } from "viem/chains";
 
 export const COOP_CHAIN = sepolia;
 export const COOP_CHAIN_ID = sepolia.id;
-/** Read RPC for the cooperative's chain (user-provisioned Alchemy endpoint). */
+/**
+ * Read RPC for the cooperative's chain (user-provisioned Alchemy endpoint).
+ * NEXT_PUBLIC_COOP_RPC_URL overrides at build time (static literal so Next
+ * inlines it) — used by the docs GIF pipeline to point at a local fork.
+ */
 export const COOP_RPC =
+  process.env.NEXT_PUBLIC_COOP_RPC_URL ||
   "https://eth-sepolia.g.alchemy.com/v2/Rr57Q41YGfkxYkx0kZp3EOQs86HatGGE";
 const COOP_EXPLORER = "https://sepolia.etherscan.io";
 /** First block of the deployment — events are scanned from here. */
