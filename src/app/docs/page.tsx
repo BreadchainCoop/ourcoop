@@ -6,28 +6,20 @@ import { Body, Button, Caption } from "@breadcoop/ui";
 import { OurCoopLogo } from "@/components/ourcoop-logo";
 import {
   ArrowRight,
-  ArrowsLeftRight,
   ArrowSquareOut,
-  Coins,
-  HandCoins,
-  Plugs,
-  Rocket,
-  Stack,
-  Users,
-  Wallet,
-  ChartBar,
-  Eye,
-  Sliders,
-  Scales,
   ClockCounterClockwise,
+  Coins,
+  Eye,
+  HandCoins,
+  PaintBrush,
+  Plugs,
+  Scales,
+  Sliders,
+  Users,
 } from "@phosphor-icons/react";
-import { CHAINS, DEFAULT_CHAIN_ID, addressUrl } from "@/lib/chains";
+import { COOP, coopAddressUrl } from "@/lib/coop";
 
-const HOME = CHAINS[DEFAULT_CHAIN_ID];
-const ADDRESSES = HOME.defaultInstance!;
-const DEPLOYER = HOME.deployer!;
-
-// Static export honours NEXT_PUBLIC_BASE_PATH (e.g. /crowdstake.fun on Pages).
+// Static export honours NEXT_PUBLIC_BASE_PATH (e.g. /ourcoop on Pages).
 // Plain <img> tags don't get it prepended automatically, so do it here.
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const gif = (name: string) => `${BASE}/docs/${name}`;
@@ -35,8 +27,6 @@ const gif = (name: string) => `${BASE}/docs/${name}`;
 type Flow = {
   id: string;
   n: number;
-  /** Caption prefix — defaults to "Step" (the protocol walkthrough). */
-  kicker?: string;
   icon: ReactNode;
   title: string;
   blurb: string;
@@ -44,144 +34,15 @@ type Flow = {
   media: string;
 };
 
+/**
+ * Every cooperative flow, recorded end to end against a fork of the live
+ * Sepolia deployment with a member wallet — each click, transaction, and
+ * state change in these GIFs is the real system reacting.
+ */
 const FLOWS: Flow[] = [
   {
-    id: "explore",
+    id: "browse",
     n: 1,
-    icon: <ChartBar weight="duotone" />,
-    title: "Explore & launch",
-    blurb:
-      "The landing page sizes a community fund for you: set a monthly interest target and it computes the members and stake required at the current yield.",
-    steps: [
-      "Drag the Community Funding Calculator to your monthly interest goal.",
-      "Browse Features and How it Works to understand the deposit → yield → vote → distribute loop.",
-      "Hit Launch App to open the dashboard.",
-    ],
-    media: "landing-tour.gif",
-  },
-  {
-    id: "connect",
-    n: 2,
-    icon: <Plugs weight="duotone" />,
-    title: "Connect a wallet",
-    blurb:
-      "Every action page is browsable before connecting — forms and live on-chain data render immediately. Connecting is only required to sign.",
-    steps: [
-      "Click Connect Wallet in the top bar.",
-      "Sign in with email or a wallet (MetaMask, Rabby, WalletConnect, …). New accounts get an embedded wallet with gasless cross-chain voting.",
-      "Approve the connection on Gnosis Chain (id 100). Wrong network? The button switches you.",
-    ],
-    media: "connect-wallet.gif",
-  },
-  {
-    id: "deposit",
-    n: 3,
-    icon: <Coins weight="duotone" />,
-    title: "Deposit",
-    blurb:
-      "Stake xDAI to mint CSTAKE 1:1. Your principal stays fully withdrawable — only the interest it earns is ever distributed.",
-    steps: [
-      "Choose xDAI (native) or WXDAI. Native wraps automatically.",
-      "Enter an amount — you'll see exactly how much CSTAKE you receive.",
-      "With WXDAI, approve once, then Deposit. Native deposits in a single transaction.",
-    ],
-    media: "deposit.gif",
-  },
-  {
-    id: "withdraw",
-    n: 4,
-    icon: <Wallet weight="duotone" />,
-    title: "Withdraw",
-    blurb:
-      "Burn CSTAKE to redeem your xDAI principal 1:1, any time. Your stake is never locked.",
-    steps: [
-      "Enter the amount of CSTAKE to redeem (Max fills your balance).",
-      "Confirm — you receive the equivalent xDAI back to your wallet.",
-    ],
-    media: "withdraw.gif",
-  },
-  {
-    id: "vote",
-    n: 5,
-    icon: <Users weight="duotone" />,
-    title: "Vote",
-    blurb:
-      "Allocate your voting power across recipients. Each recipient's share of the next distribution is proportional to its total weighted votes.",
-    steps: [
-      "Review the active recipients and their current shares.",
-      "Drag each slider to weight recipients (relative — they don't have to sum to 100%).",
-      "Cast your vote. Your weight is scaled by your voting power and counted for the cycle.",
-    ],
-    media: "vote.gif",
-  },
-  {
-    id: "distribute",
-    n: 6,
-    icon: <HandCoins weight="duotone" />,
-    title: "Distribute",
-    blurb:
-      "Once a cycle completes, anyone can trigger the distribution. Accrued sDAI yield is claimed, split among recipients by their votes, and the cycle advances.",
-    steps: [
-      "Check the readiness panel: cycle complete, recipients present, votes cast, yield accrued.",
-      "Trigger Claim & distribute — permissionless, no admin required.",
-      "Yield is minted as CSTAKE to recipients pro-rata and a fresh cycle begins.",
-    ],
-    media: "distribute.gif",
-  },
-  {
-    id: "recipients",
-    n: 7,
-    icon: <Stack weight="duotone" />,
-    title: "Recipients",
-    blurb:
-      "The recipient registry is public and browsable by anyone. The registry admin queues additions and removals, then applies them in one transaction.",
-    steps: [
-      "Anyone can view the active recipients and any pending changes.",
-      "The admin queues an address to add, or queues a recipient for removal.",
-      "Process queue applies all pending changes; recipients then appear on the Vote page.",
-    ],
-    media: "recipients.gif",
-  },
-  {
-    id: "deploy",
-    n: 8,
-    icon: <Rocket weight="duotone" />,
-    title: "Deploy your own instance",
-    blurb:
-      "Launch a complete, self-owned O.U.R.COOP system on Gnosis in a single transaction via the CrowdStakeDeployer. You become the admin of every contract.",
-    steps: [
-      "Name your token and symbol, and set a cycle length in blocks (~5s each on Gnosis).",
-      "Optionally set an owner (defaults to your address).",
-      "Deploy — token, cycle module, voting module + power, recipient registry, and distribution manager are wired and handed to you.",
-    ],
-    media: "deploy.gif",
-  },
-  {
-    id: "switch",
-    n: 9,
-    icon: <ArrowsLeftRight weight="duotone" />,
-    title: "Switch between instances",
-    blurb:
-      "The app is multi-instance. Run the default deployment, your own, or anyone's — all from the same dashboard, persisted locally.",
-    steps: [
-      "Open the instance switcher in the top bar.",
-      "Add any instance by its distribution-manager address; the app resolves the full system.",
-      "Switch the active instance — every page re-reads from it.",
-    ],
-    media: "instance-switcher.gif",
-  },
-];
-
-/**
- * The cooperative app (/coop) — recorded end-to-end against a fork of the
- * live Sepolia deployment with a member wallet, so every click, transaction,
- * and state change in these GIFs is the real system reacting.
- */
-const COOP_FLOWS: Flow[] = [
-  {
-    id: "coop-browse",
-    n: 1,
-    kicker: "Coop",
     icon: <Eye weight="duotone" />,
     title: "Browse the cooperative",
     blurb:
@@ -194,9 +55,8 @@ const COOP_FLOWS: Flow[] = [
     media: "coop-browse.gif",
   },
   {
-    id: "coop-connect",
+    id: "connect",
     n: 2,
-    kicker: "Coop",
     icon: <Plugs weight="duotone" />,
     title: "Connect as a member",
     blurb:
@@ -209,9 +69,36 @@ const COOP_FLOWS: Flow[] = [
     media: "coop-connect.gif",
   },
   {
-    id: "coop-vote",
+    id: "deposit",
     n: 3,
-    kicker: "Coop",
+    icon: <Coins weight="duotone" />,
+    title: "Deposit & mint cUSD",
+    blurb:
+      "cUSD is the cooperative's unit of account, minted 1:1 against the underlying stablecoin and redeemable 1:1 anytime. The pooled principal sits in a yield vault — the interest it earns is what becomes the Art Fund.",
+    steps: [
+      "Mint yourself test USD from the open Sepolia faucet card.",
+      "Approve, then mint — your deposit joins the pooled principal and you receive cUSD 1:1.",
+      "Redeem burns cUSD back to the underlying 1:1 — the principal is never locked or spent.",
+    ],
+    media: "coop-deposit.gif",
+  },
+  {
+    id: "project",
+    n: 4,
+    icon: <PaintBrush weight="duotone" />,
+    title: "Register an art project",
+    blurb:
+      "Projects carry a payout address, a full budget, and a minimum-viable floor. The coordinator registers them on-chain; new proposals queue, then activate onto the ballot when the queue is processed.",
+    steps: [
+      "Fill in the title, summary, payout address, full budget, and minimum-viable floor.",
+      "Register project queues the proposal on the registry (coordinator-signed).",
+      "Process queue — anyone can call it — activates queued projects onto the ballot.",
+    ],
+    media: "coop-project.gif",
+  },
+  {
+    id: "vote",
+    n: 5,
     icon: <Sliders weight="duotone" />,
     title: "Cast a 100-point ballot",
     blurb:
@@ -224,9 +111,8 @@ const COOP_FLOWS: Flow[] = [
     media: "coop-vote.gif",
   },
   {
-    id: "coop-round",
-    n: 4,
-    kicker: "Coop",
+    id: "round",
+    n: 6,
     icon: <HandCoins weight="duotone" />,
     title: "Run a funding round",
     blurb:
@@ -239,9 +125,8 @@ const COOP_FLOWS: Flow[] = [
     media: "coop-round.gif",
   },
   {
-    id: "coop-withdrawal",
-    n: 5,
-    kicker: "Coop",
+    id: "withdrawal",
+    n: 7,
     icon: <Scales weight="duotone" />,
     title: "Propose & vote a withdrawal",
     blurb:
@@ -254,16 +139,29 @@ const COOP_FLOWS: Flow[] = [
     media: "coop-withdrawal.gif",
   },
   {
-    id: "coop-activity",
-    n: 6,
-    kicker: "Coop",
+    id: "members",
+    n: 8,
+    icon: <Users weight="duotone" />,
+    title: "Manage the membership",
+    blurb:
+      "The roster is on-chain: every member holds exactly one vote, replayed from membership events. The coordinator adds and removes members; the list, the count, and each change are public.",
+    steps: [
+      "Members lists the live roster with the coordinator and your own wallet tagged.",
+      "The coordinator adds a member by address — they get one vote, like everyone.",
+      "Removals work the same way; every change lands in the activity log.",
+    ],
+    media: "coop-members.gif",
+  },
+  {
+    id: "activity",
+    n: 9,
     icon: <ClockCounterClockwise weight="duotone" />,
     title: "Audit the activity log",
     blurb:
-      "Every token movement and governance event — ballots, funded projects, rounds, withdrawal proposals and votes — is reconstructed from on-chain events, newest first.",
+      "Every token movement and governance event — ballots, funded projects, rounds, withdrawal proposals and votes, membership changes — is reconstructed from on-chain events, newest first.",
     steps: [
       "Token movements show fund-to-fund and fund-to-recipient transfers with amounts and notes.",
-      "The governance log lists every ballot, round, and withdrawal decision.",
+      "The governance log lists every ballot, round, withdrawal decision, and roster change.",
       "Everything links back to the chain — nothing here is off-chain bookkeeping.",
     ],
     media: "coop-activity.gif",
@@ -271,14 +169,15 @@ const COOP_FLOWS: Flow[] = [
 ];
 
 const SYSTEM = [
-  ["Project token (CSTAKE)", ADDRESSES.token],
-  ["Distribution manager", ADDRESSES.distributionManager],
-  ["Cycle module", ADDRESSES.cycleModule],
-  ["Voting module", ADDRESSES.votingModule],
-  ["Recipient registry", ADDRESSES.recipientRegistry],
-  ["Distribution strategy", ADDRESSES.distributionStrategy],
-  ["Voting-power strategy", ADDRESSES.votingPowerStrategy],
-  ["CrowdStake deployer", DEPLOYER],
+  ["Cooperative token (cUSD)", COOP.token],
+  ["Test USD (open faucet)", COOP.usd],
+  ["Membership power (1p1v)", COOP.power],
+  ["Project registry", COOP.registry],
+  ["100-point voting module", COOP.voting],
+  ["Art-fund strategy", COOP.strategy],
+  ["Distribution manager", COOP.distributionManager],
+  ["Cycle module", COOP.cycleModule],
+  ["Fund withdrawals", COOP.withdrawals],
 ] as const;
 
 export default function DocsPage() {
@@ -289,19 +188,19 @@ export default function DocsPage() {
       {/* Hero */}
       <header className="section-container pt-16 pb-10">
         <Caption className="text-core-orange font-semibold tracking-wide uppercase">
-          Documentation
+          ✳ Documentation
         </Caption>
         <h1 className="font-breadDisplay text-text-standard mt-3 text-5xl font-extrabold tracking-tight sm:text-6xl">
           Every flow, end to end
         </h1>
         <Body className="text-surface-grey-2 mt-4 max-w-2xl text-lg">
-          A step-by-step walkthrough of O.U.R.COOP on Gnosis — from sizing a
-          community fund to depositing, voting, distributing yield, and
-          deploying your own instance. Each section pairs a short recording with
-          the exact steps.
+          A step-by-step walkthrough of governing O.U.R.COOP — depositing into
+          the shared pool, registering art projects, casting 100-point ballots,
+          running funding rounds, voting fund withdrawals, and managing the
+          membership. Each section pairs a short recording with the exact steps.
         </Body>
         <div className="mt-6 flex flex-wrap gap-3">
-          <Button app="fund" variant="primary" as={Link} href="/app">
+          <Button app="fund" variant="primary" as={Link} href="/coop">
             Open the app
           </Button>
           <Button app="fund" variant="secondary" as={Link} href="/">
@@ -315,14 +214,14 @@ export default function DocsPage() {
         <div className="border-paper-2 bg-paper-0 rounded-2xl border p-5">
           <Caption className="text-surface-grey-2">On this page</Caption>
           <ol className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-            {[...FLOWS, ...COOP_FLOWS].map((f) => (
+            {FLOWS.map((f) => (
               <li key={f.id}>
                 <a
                   href={`#${f.id}`}
                   className="text-text-standard hover:text-core-orange flex items-center gap-2 text-sm font-medium transition-colors"
                 >
                   <span className="bg-core-orange/10 text-core-orange inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold">
-                    {f.kicker ? "✳" : f.n}
+                    {f.n}
                   </span>
                   {f.title}
                 </a>
@@ -339,11 +238,10 @@ export default function DocsPage() {
             <span className="text-text-standard font-semibold">
               About these recordings.
             </span>{" "}
-            The clips are real UI walkthroughs captured against the live
-            dashboard reading on-chain Gnosis state. The wallet-signing step is
-            shown up to the confirmation prompt; the signed transactions
-            themselves (deposit, vote, distribute, deploy, admin) are verified
-            on-chain — see the live system addresses at the bottom of this page.
+            Every clip was driven end to end against a fork of the live Sepolia
+            deployment with a member wallet — the transactions execute for real
+            and every state change shown is the actual system reacting. The live
+            contracts are listed at the bottom of this page.
           </Body>
         </div>
       </div>
@@ -354,30 +252,6 @@ export default function DocsPage() {
           <FlowSection key={f.id} flow={f} eager={i === 0} />
         ))}
 
-        {/* Cooperative app */}
-        <section id="coop-app" className="scroll-mt-20">
-          <Caption className="text-core-orange font-semibold tracking-wide uppercase">
-            ✳ The cooperative app
-          </Caption>
-          <h2 className="font-breadDisplay text-text-standard mt-2 text-4xl font-extrabold tracking-tight">
-            Governing O.U.R.COOP
-          </h2>
-          <Body className="text-surface-grey-2 mt-3 max-w-2xl">
-            The cooperative&apos;s own governance interface at{" "}
-            <Link href="/coop" className="text-core-orange hover:underline">
-              /coop
-            </Link>{" "}
-            — funds, project ballots, funding rounds, and withdrawal votes.
-            These recordings were driven end to end against a fork of the live
-            Sepolia deployment with a member wallet: every transaction and state
-            change shown is the real system reacting.
-          </Body>
-        </section>
-
-        {COOP_FLOWS.map((f) => (
-          <FlowSection key={f.id} flow={f} />
-        ))}
-
         {/* Live system */}
         <section id="system" className="scroll-mt-20">
           <div className="flex items-center gap-3">
@@ -385,19 +259,23 @@ export default function DocsPage() {
               <ArrowSquareOut weight="duotone" size={20} />
             </span>
             <h2 className="font-breadDisplay text-text-standard text-3xl font-extrabold tracking-tight">
-              Live on Gnosis
+              Live on Sepolia
             </h2>
           </div>
           <Body className="text-surface-grey-2 mt-3 max-w-2xl">
-            The default instance is deployed and verifiable on Gnosis mainnet
-            (chain id 100). Every contract below is live — open it on
-            Gnosisscan.
+            The cooperative&apos;s modules — custom implementations of the
+            crowdstake interfaces (
+            <code className="text-text-standard">
+              contracts/src/examples/cova
+            </code>
+            ) — are deployed and verifiable on Ethereum Sepolia. Every contract
+            below is live — open it on Etherscan.
           </Body>
           <div className="border-paper-2 divide-paper-2 bg-paper-0 mt-6 divide-y overflow-hidden rounded-2xl border">
             {SYSTEM.map(([label, addr]) => (
               <a
                 key={label}
-                href={addressUrl(addr, DEFAULT_CHAIN_ID)}
+                href={coopAddressUrl(addr)}
                 target="_blank"
                 rel="noreferrer"
                 className="hover:bg-paper-1 flex items-center justify-between gap-4 px-5 py-3.5 transition-colors"
@@ -439,24 +317,29 @@ export default function DocsPage() {
         {/* Footer CTA */}
         <section className="border-paper-2 bg-paper-0 rounded-3xl border px-8 py-12 text-center">
           <h2 className="font-breadDisplay text-text-standard text-3xl font-extrabold tracking-tight">
-            Ready to try it?
+            Ready to take part?
           </h2>
           <Body className="text-surface-grey-2 mx-auto mt-3 max-w-xl">
-            Open the dashboard to deposit, vote, and distribute — or deploy your
-            own community instance in one transaction.
+            Open the cooperative to browse the live state — and connect a member
+            wallet to deposit, vote, and govern the funds.
           </Body>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Button
               app="fund"
               variant="primary"
               as={Link}
-              href="/app"
+              href="/coop"
               rightIcon={<ArrowRight weight="bold" />}
             >
-              Launch App
+              Open the app
             </Button>
-            <Button app="fund" variant="secondary" as={Link} href="/app/deploy">
-              Deploy an instance
+            <Button
+              app="fund"
+              variant="secondary"
+              as="a"
+              href={`${BASE}/docs/runbook.html`}
+            >
+              Read the runbook
             </Button>
           </div>
         </section>
@@ -473,7 +356,7 @@ function FlowSection({ flow, eager }: { flow: Flow; eager?: boolean }) {
           {flow.icon}
         </span>
         <Caption className="text-surface-grey font-semibold">
-          {flow.kicker ?? "Step"} {flow.n}
+          Step {flow.n}
         </Caption>
       </div>
       <h2 className="font-breadDisplay text-text-standard mt-2 text-3xl font-extrabold tracking-tight">
@@ -528,7 +411,7 @@ function DocsNav() {
           <Button app="fund" variant="secondary" size="sm" as={Link} href="/">
             Home
           </Button>
-          <Button app="fund" variant="primary" size="sm" as={Link} href="/app">
+          <Button app="fund" variant="primary" size="sm" as={Link} href="/coop">
             Launch App
           </Button>
         </div>

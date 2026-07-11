@@ -20,7 +20,11 @@ import {
   FUND_KEYS,
   coopAddressUrl,
   coopDmAbi,
+  coopPowerAbi,
+  coopRegistryAbi,
+  coopTokenAbi,
   coopTxUrl,
+  coopUsdAbi,
   coopVotingAbi,
   coopWithdrawalsAbi,
   toCoopWei,
@@ -35,9 +39,11 @@ import { WalletButton } from "@/components/dapp/wallet-button";
 
 const VIEWS = [
   ["home", "Home"],
+  ["deposit", "Deposit"],
   ["funds", "Funds"],
   ["projects", "Projects & voting"],
   ["withdrawals", "Withdrawals"],
+  ["members", "Members"],
   ["activity", "Activity"],
 ] as const;
 type ViewId = (typeof VIEWS)[number][0];
@@ -80,9 +86,11 @@ export default function CoopPage() {
         {data && (
           <>
             {view === "home" && <HomeView state={data} setView={setView} />}
+            {view === "deposit" && <DepositView state={data} />}
             {view === "funds" && <FundsView state={data} />}
             {view === "projects" && <ProjectsView state={data} />}
             {view === "withdrawals" && <WithdrawalsView state={data} />}
+            {view === "members" && <MembersView state={data} />}
             {view === "activity" && <ActivityView state={data} />}
             <div className="mt-10 flex items-center justify-between">
               <Caption className="text-surface-grey">
@@ -479,6 +487,11 @@ function ProjectsView({ state }: { state: CoopState }) {
       <CycleBanner state={state} />
       <div className="mt-4">
         <BallotCard state={state} />
+      </div>
+      <SectionTitle>Register an art project</SectionTitle>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RegisterProjectCard state={state} />
+        <QueuedProjectsCard state={state} />
       </div>
       <SectionTitle>Projects</SectionTitle>
       <Card className="overflow-x-auto p-0">
@@ -1087,5 +1100,503 @@ function MovementsTable({
         </tbody>
       </table>
     </Card>
+  );
+}
+
+/* --------------------------------- Deposit -------------------------------- */
+
+function DepositView({ state }: { state: CoopState }) {
+  const { isConnected, address } = useAccount();
+  const [faucetAmt, setFaucetAmt] = useState("500");
+  const [depositAmt, setDepositAmt] = useState("100");
+  const [redeemAmt, setRedeemAmt] = useState("");
+  const faucet = useCoopTx();
+  const approve = useCoopTx();
+  const mint = useCoopTx();
+  const redeem = useCoopTx();
+
+  const depositNum = Number(depositAmt || 0);
+  const needsApproval = depositNum > 0 && state.usdAllowance < depositNum;
+
+  return (
+    <div>
+      <div className="mt-6">
+        <PageHeader
+          title="Deposit"
+          subtitle="cUSD is the cooperative's unit of account: deposit the underlying test USD 1:1 to mint it, redeem 1:1 anytime. The pooled principal earns the yield that becomes the Art Fund."
+        />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StatCard
+          label="Your cUSD"
+          value={usd(state.myCusd)}
+          sub="redeemable 1:1"
+          accent
+        />
+        <StatCard label="Your test USD" value={usd(state.myUsd)} />
+      </div>
+      {!isConnected && (
+        <Card className="mt-4">
+          <Body className="text-surface-grey-2 text-sm">
+            Connect a wallet (Sepolia) to mint and redeem — balances above show
+            once connected.
+          </Body>
+        </Card>
+      )}
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <Card>
+          <Heading4 className="text-text-standard">1 · Get test USD</Heading4>
+          <Body className="text-surface-grey-2 mt-2 text-sm">
+            The Sepolia deployment wraps an open-faucet test stablecoin — mint
+            yourself some to play with.
+          </Body>
+          <input
+            type="number"
+            min={0}
+            value={faucetAmt}
+            onChange={(e) => setFaucetAmt(e.target.value)}
+            className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange mt-3 w-full rounded-xl border px-3 py-2 text-sm outline-none"
+          />
+          <Button
+            app="fund"
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            disabled={
+              !isConnected || Number(faucetAmt || 0) <= 0 || faucet.isBusy
+            }
+            onClick={() =>
+              void faucet.run({
+                address: COOP.usd,
+                abi: coopUsdAbi,
+                functionName: "mint",
+                args: [address, toCoopWei(Number(faucetAmt))],
+              })
+            }
+          >
+            {faucet.isBusy ? "Minting…" : "Mint test USD"}
+          </Button>
+          <TxLine
+            status={faucet.status}
+            hash={faucet.hash}
+            error={faucet.error}
+            successLabel="Test USD minted."
+          />
+        </Card>
+        <Card>
+          <Heading4 className="text-text-standard">2 · Mint cUSD</Heading4>
+          <Body className="text-surface-grey-2 mt-2 text-sm">
+            Deposit test USD 1:1 — it joins the pooled principal (parked in the
+            yield vault) and you receive cUSD.
+          </Body>
+          <input
+            type="number"
+            min={0}
+            value={depositAmt}
+            onChange={(e) => setDepositAmt(e.target.value)}
+            className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange mt-3 w-full rounded-xl border px-3 py-2 text-sm outline-none"
+          />
+          {needsApproval ? (
+            <Button
+              app="fund"
+              variant="secondary"
+              size="sm"
+              className="mt-3"
+              disabled={!isConnected || approve.isBusy}
+              onClick={() =>
+                void approve.run({
+                  address: COOP.usd,
+                  abi: coopUsdAbi,
+                  functionName: "approve",
+                  args: [COOP.token, toCoopWei(depositNum)],
+                })
+              }
+            >
+              {approve.isBusy ? "Approving…" : "Approve test USD"}
+            </Button>
+          ) : (
+            <Button
+              app="fund"
+              variant="primary"
+              size="sm"
+              className="mt-3"
+              disabled={
+                !isConnected ||
+                depositNum <= 0 ||
+                depositNum > state.myUsd ||
+                mint.isBusy
+              }
+              onClick={() =>
+                void mint.run({
+                  address: COOP.token,
+                  abi: coopTokenAbi,
+                  functionName: "mint",
+                  args: [address, toCoopWei(depositNum)],
+                })
+              }
+            >
+              {mint.isBusy ? "Minting…" : "Mint cUSD"}
+            </Button>
+          )}
+          <TxLine
+            status={approve.status}
+            hash={approve.hash}
+            error={approve.error}
+            successLabel="Approved — now mint."
+          />
+          <TxLine
+            status={mint.status}
+            hash={mint.hash}
+            error={mint.error}
+            successLabel="cUSD minted 1:1."
+          />
+        </Card>
+        <Card>
+          <Heading4 className="text-text-standard">Redeem anytime</Heading4>
+          <Body className="text-surface-grey-2 mt-2 text-sm">
+            Burn cUSD to withdraw the underlying test USD 1:1 — the principal is
+            never locked.
+          </Body>
+          <input
+            type="number"
+            min={0}
+            value={redeemAmt}
+            onChange={(e) => setRedeemAmt(e.target.value)}
+            placeholder={String(Math.floor(state.myCusd))}
+            className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange mt-3 w-full rounded-xl border px-3 py-2 text-sm outline-none"
+          />
+          <Button
+            app="fund"
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            disabled={
+              !isConnected ||
+              Number(redeemAmt || 0) <= 0 ||
+              Number(redeemAmt || 0) > state.myCusd ||
+              redeem.isBusy
+            }
+            onClick={() =>
+              void redeem.run({
+                address: COOP.token,
+                abi: coopTokenAbi,
+                functionName: "burn",
+                args: [toCoopWei(Number(redeemAmt)), address],
+              })
+            }
+          >
+            {redeem.isBusy ? "Redeeming…" : "Redeem"}
+          </Button>
+          <TxLine
+            status={redeem.status}
+            hash={redeem.hash}
+            error={redeem.error}
+            successLabel="Redeemed 1:1."
+          />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- Project registration ------------------------ */
+
+function RegisterProjectCard({ state }: { state: CoopState }) {
+  const { address, isConnected } = useAccount();
+  const isCoordinator =
+    isConnected && address?.toLowerCase() === state.coordinator.toLowerCase();
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [recipient, setRecipient] = useState("");
+  const [full, setFull] = useState("1000");
+  const [minViable, setMinViable] = useState("400");
+  const tx = useCoopTx();
+
+  const fullNum = Number(full || 0);
+  const minNum = Number(minViable || 0);
+  const valid =
+    title.trim().length > 0 &&
+    isAddress(recipient.trim()) &&
+    fullNum > 0 &&
+    minNum > 0 &&
+    minNum <= fullNum;
+
+  return (
+    <Card>
+      <Heading4 className="text-text-standard">Register a project</Heading4>
+      <Body className="text-surface-grey-2 mt-1 text-sm">
+        The coordinator registers proposals with a full budget and a
+        minimum-viable floor. New projects queue, then activate at the cycle
+        boundary.
+      </Body>
+      <div className="mt-4 space-y-3">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Project title"
+          className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-3 py-2 text-sm outline-none"
+        />
+        <textarea
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          rows={2}
+          placeholder="What the project is, who it benefits"
+          className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-3 py-2 text-sm outline-none"
+        />
+        <input
+          value={recipient}
+          onChange={(e) => setRecipient(e.target.value)}
+          placeholder="Payout address 0x…"
+          className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-3 py-2 font-mono text-sm outline-none"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <Caption className="text-surface-grey-2 mb-1 block">
+              Full budget (cUSD)
+            </Caption>
+            <input
+              type="number"
+              min={0}
+              value={full}
+              onChange={(e) => setFull(e.target.value)}
+              className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-3 py-2 text-sm outline-none"
+            />
+          </label>
+          <label className="block">
+            <Caption className="text-surface-grey-2 mb-1 block">
+              Min viable (cUSD)
+            </Caption>
+            <input
+              type="number"
+              min={0}
+              value={minViable}
+              onChange={(e) => setMinViable(e.target.value)}
+              className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange w-full rounded-xl border px-3 py-2 text-sm outline-none"
+            />
+          </label>
+        </div>
+      </div>
+      <Button
+        app="fund"
+        variant="primary"
+        size="sm"
+        className="mt-4"
+        disabled={!isCoordinator || !valid || tx.isBusy}
+        onClick={() =>
+          void tx.run({
+            address: COOP.registry,
+            abi: coopRegistryAbi,
+            functionName: "registerProject",
+            args: [
+              recipient.trim() as Address,
+              toCoopWei(fullNum),
+              toCoopWei(minNum),
+              title.trim(),
+              summary.trim(),
+            ],
+          })
+        }
+      >
+        {tx.isBusy ? "Registering…" : "Register project"}
+      </Button>
+      {!isCoordinator && (
+        <Caption className="text-surface-grey mt-2 block">
+          Only the coordinator ({shortenAddress(state.coordinator)}) can
+          register projects on-chain.
+        </Caption>
+      )}
+      {minNum > fullNum && (
+        <Caption className="text-system-red mt-2 block">
+          The minimum-viable floor can&apos;t exceed the full budget.
+        </Caption>
+      )}
+      <TxLine
+        status={tx.status}
+        hash={tx.hash}
+        error={tx.error}
+        successLabel="Project registered — it's in the queue."
+      />
+    </Card>
+  );
+}
+
+function QueuedProjectsCard({ state }: { state: CoopState }) {
+  const tx = useCoopTx();
+  const { isConnected } = useAccount();
+  return (
+    <Card>
+      <Heading4 className="text-text-standard">Queued projects</Heading4>
+      <Body className="text-surface-grey-2 mt-1 text-sm">
+        Registered proposals wait here until the queue is processed — then they
+        join the ballot. Anyone can process the queue.
+      </Body>
+      {state.queuedProjects.length === 0 ? (
+        <Caption className="text-surface-grey mt-4 block">
+          Nothing queued right now.
+        </Caption>
+      ) : (
+        <div className="border-paper-2 mt-4 border-t">
+          {state.queuedProjects.map((q) => (
+            <div key={q.addr} className="border-paper-2 border-b py-3">
+              <span className="text-text-standard text-sm font-semibold">
+                {q.title}
+              </span>
+              <span className="text-surface-grey block text-xs">
+                {shortenAddress(q.addr)} · full {usd(q.full)} · min{" "}
+                {usd(q.minViable)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <Button
+        app="fund"
+        variant="secondary"
+        size="sm"
+        className="mt-4"
+        disabled={
+          !isConnected || state.queuedProjects.length === 0 || tx.isBusy
+        }
+        onClick={() =>
+          void tx.run({
+            address: COOP.registry,
+            abi: coopRegistryAbi,
+            functionName: "processQueue",
+          })
+        }
+      >
+        {tx.isBusy ? "Processing…" : "Process queue"}
+      </Button>
+      <TxLine
+        status={tx.status}
+        hash={tx.hash}
+        error={tx.error}
+        successLabel="Queue processed — projects are live on the ballot."
+      />
+    </Card>
+  );
+}
+
+/* --------------------------------- Members -------------------------------- */
+
+function MembersView({ state }: { state: CoopState }) {
+  const { address, isConnected } = useAccount();
+  const isCoordinator =
+    isConnected && address?.toLowerCase() === state.coordinator.toLowerCase();
+  const [newMember, setNewMember] = useState("");
+  const addTx = useCoopTx();
+  const removeTx = useCoopTx();
+
+  return (
+    <div>
+      <div className="mt-6">
+        <PageHeader
+          title="Members"
+          subtitle="One member, one vote — voting power comes from membership, not balance. The coordinator manages the roster on-chain."
+        />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StatCard label="Members" value={state.memberCount} accent />
+        <StatCard
+          label="Coordinator"
+          value={shortenAddress(state.coordinator)}
+          sub="owns the membership & registry contracts"
+        />
+      </div>
+      <SectionTitle>Roster</SectionTitle>
+      <Card className="p-0">
+        {state.members.map((m) => (
+          <div
+            key={m}
+            className="border-paper-2 flex items-center justify-between gap-3 border-b px-5 py-3 last:border-0"
+          >
+            <a
+              href={coopAddressUrl(m)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-text-standard hover:text-core-orange font-mono text-sm"
+            >
+              {m}
+            </a>
+            <div className="flex items-center gap-2">
+              {m.toLowerCase() === state.coordinator.toLowerCase() && (
+                <Chip size="small" className="text-core-orange">
+                  coordinator
+                </Chip>
+              )}
+              {isConnected && m.toLowerCase() === address?.toLowerCase() && (
+                <Chip size="small" className="text-system-green">
+                  you
+                </Chip>
+              )}
+              {isCoordinator && (
+                <Button
+                  app="fund"
+                  variant="secondary"
+                  size="sm"
+                  disabled={removeTx.isBusy}
+                  onClick={() =>
+                    void removeTx.run({
+                      address: COOP.power,
+                      abi: coopPowerAbi,
+                      functionName: "removeMember",
+                      args: [m],
+                    })
+                  }
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </Card>
+      <TxLine
+        status={removeTx.status}
+        hash={removeTx.hash}
+        error={removeTx.error}
+        successLabel="Member removed."
+      />
+      <SectionTitle>Add a member</SectionTitle>
+      <Card>
+        <Body className="text-surface-grey-2 text-sm">
+          New members get exactly one vote — the same as everyone else. Only the
+          coordinator ({shortenAddress(state.coordinator)}) can add or remove
+          members.
+        </Body>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <input
+            value={newMember}
+            onChange={(e) => setNewMember(e.target.value)}
+            placeholder="0x…"
+            className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange min-w-64 flex-1 rounded-xl border px-3 py-2 font-mono text-sm outline-none"
+          />
+          <Button
+            app="fund"
+            variant="primary"
+            size="sm"
+            disabled={
+              !isCoordinator || !isAddress(newMember.trim()) || addTx.isBusy
+            }
+            onClick={() =>
+              void addTx.run({
+                address: COOP.power,
+                abi: coopPowerAbi,
+                functionName: "addMember",
+                args: [newMember.trim() as Address],
+              })
+            }
+          >
+            {addTx.isBusy ? "Adding…" : "Add member"}
+          </Button>
+        </div>
+        <TxLine
+          status={addTx.status}
+          hash={addTx.hash}
+          error={addTx.error}
+          successLabel="Member added — one vote, like everyone."
+        />
+      </Card>
+    </div>
   );
 }

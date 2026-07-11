@@ -30,6 +30,8 @@ const DEPLOY_BLOCK = 10875043n;
 
 export const COOP = {
   token: "0x4fFA26B6fBa8B36b4Dd0f7CF1bf57e0FD5d1D02a",
+  /** MockUSD — the Sepolia test stablecoin cUSD wraps; open faucet mint. */
+  usd: "0x3C0E80004a3699698D2037e728cf33B7D156781D",
   power: "0x73Ae31EfB48F3e0D29e7acdf309783B408D3dB4C",
   registry: "0xDa9B83Ac5c9C10154B3a632C92B13584b3CC4011",
   voting: "0xC4F9956b6Aa252d12F4478919E932e601EbF678F",
@@ -42,14 +44,31 @@ export const COOP = {
 export const coopTokenAbi = parseAbi([
   "function balanceOf(address) view returns (uint256)",
   "function yieldAccrued() view returns (uint256)",
+  "function mint(address receiver, uint256 amount)",
+  "function burn(uint256 amount, address receiver)",
+]);
+export const coopUsdAbi = parseAbi([
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function mint(address to, uint256 amount)",
 ]);
 export const coopPowerAbi = parseAbi([
   "function isMember(address) view returns (bool)",
   "function memberCount() view returns (uint256)",
+  "function owner() view returns (address)",
+  "function addMember(address member)",
+  "function removeMember(address member)",
+  "event MemberAdded(address indexed member)",
+  "event MemberRemoved(address indexed member)",
 ]);
 export const coopRegistryAbi = parseAbi([
   "function getRecipients() view returns (address[])",
+  "function getQueuedAdditions() view returns (address[])",
   "function project(address) view returns ((uint256 fullBudget, uint256 minViableBudget, string title, string summary, bool exists))",
+  "function registerProject(address recipient, uint256 fullBudget, uint256 minViableBudget, string title, string summary)",
+  "function processQueue()",
+  "function owner() view returns (address)",
   "event ProjectRegistered(address indexed project, uint256 fullBudget, uint256 minViableBudget, string title)",
 ]);
 export const coopVotingAbi = parseAbi([
@@ -164,9 +183,18 @@ export interface CoopLogEntry {
   text: string;
 }
 
+export interface CoopQueuedProject {
+  addr: Address;
+  title: string;
+  summary: string;
+  full: number;
+  minViable: number;
+}
+
 export interface CoopState {
   funds: Record<FundKey, number>;
   projects: CoopProject[];
+  queuedProjects: CoopQueuedProject[];
   withdrawals: CoopWithdrawal[];
   cycle: number;
   cycleComplete: boolean;
@@ -174,7 +202,15 @@ export interface CoopState {
   ready: boolean;
   memberCount: number;
   isMember: boolean;
+  /** The coordinator (owner of the membership + registry contracts). */
+  coordinator: Address;
+  /** Current member addresses, replayed from MemberAdded/Removed events. */
+  members: Address[];
   artYield: number;
+  /** Connected account's balances (0 when browsing without a wallet). */
+  myCusd: number;
+  myUsd: number;
+  usdAllowance: number;
   movements: CoopMovement[];
   log: CoopLogEntry[];
 }
@@ -210,6 +246,11 @@ export async function fetchCoopState(account?: Address): Promise<CoopState> {
     artEscrow,
     artYield,
     withdrawalsCount,
+    queuedAddrs,
+    coordinator,
+    myCusdRaw,
+    myUsdRaw,
+    usdAllowanceRaw,
   ] = await Promise.all([
     coopClient.readContract({
       address: COOP.withdrawals,
@@ -272,6 +313,34 @@ export async function fetchCoopState(account?: Address): Promise<CoopState> {
       address: COOP.withdrawals,
       abi: coopWithdrawalsAbi,
       functionName: "withdrawalsCount",
+    }),
+    coopClient.readContract({
+      address: COOP.registry,
+      abi: coopRegistryAbi,
+      functionName: "getQueuedAdditions",
+    }),
+    coopClient.readContract({
+      address: COOP.power,
+      abi: coopPowerAbi,
+      functionName: "owner",
+    }),
+    coopClient.readContract({
+      address: COOP.token,
+      abi: coopTokenAbi,
+      functionName: "balanceOf",
+      args: [who],
+    }),
+    coopClient.readContract({
+      address: COOP.usd,
+      abi: coopUsdAbi,
+      functionName: "balanceOf",
+      args: [who],
+    }),
+    coopClient.readContract({
+      address: COOP.usd,
+      abi: coopUsdAbi,
+      functionName: "allowance",
+      args: [who, COOP.token],
     }),
   ]);
 
@@ -343,11 +412,30 @@ export async function fetchCoopState(account?: Address): Promise<CoopState> {
     }),
   );
 
-  const { movements, log } = await fetchActivity(projects);
+  const queuedProjects: CoopQueuedProject[] = await Promise.all(
+    queuedAddrs.map(async (addr) => {
+      const p = await coopClient.readContract({
+        address: COOP.registry,
+        abi: coopRegistryAbi,
+        functionName: "project",
+        args: [addr],
+      });
+      return {
+        addr,
+        title: p.title,
+        summary: p.summary,
+        full: toUsd(p.fullBudget),
+        minViable: toUsd(p.minViableBudget),
+      };
+    }),
+  );
+
+  const { movements, log, members } = await fetchActivity(projects);
 
   return {
     funds,
     projects,
+    queuedProjects,
     withdrawals,
     cycle: Number(cycle),
     cycleComplete,
@@ -355,17 +443,24 @@ export async function fetchCoopState(account?: Address): Promise<CoopState> {
     ready,
     memberCount: Number(memberCount),
     isMember,
+    coordinator,
+    members,
     artYield: toUsd(artYield),
+    myCusd: toUsd(myCusdRaw),
+    myUsd: toUsd(myUsdRaw),
+    usdAllowance: toUsd(usdAllowanceRaw),
     movements,
     log,
   };
 }
 
 /** Event-derived movements + governance log (newest first). */
-async function fetchActivity(
-  projects: CoopProject[],
-): Promise<{ movements: CoopMovement[]; log: CoopLogEntry[] }> {
-  const [evW, evS, evV, evR] = await Promise.all([
+async function fetchActivity(projects: CoopProject[]): Promise<{
+  movements: CoopMovement[];
+  log: CoopLogEntry[];
+  members: Address[];
+}> {
+  const [evW, evS, evV, evR, evP] = await Promise.all([
     coopClient
       .getLogs({
         address: COOP.withdrawals,
@@ -398,9 +493,17 @@ async function fetchActivity(
         toBlock: "latest",
       })
       .catch(() => []),
+    coopClient
+      .getLogs({
+        address: COOP.power,
+        events: coopPowerAbi.filter((f) => f.type === "event"),
+        fromBlock: DEPLOY_BLOCK,
+        toBlock: "latest",
+      })
+      .catch(() => []),
   ]);
 
-  const all = [...evW, ...evS, ...evV, ...evR];
+  const all = [...evW, ...evS, ...evV, ...evR, ...evP];
 
   // Timestamp lookup, one getBlock per distinct block.
   const blockNumbers = [...new Set(all.map((l) => l.blockNumber))];
@@ -434,6 +537,7 @@ async function fetchActivity(
 
   const movements: CoopMovement[] = [];
   const log: CoopLogEntry[] = [];
+  const memberSet = new Set<Address>();
   for (const l of all) {
     const ev = l as unknown as {
       eventName: string;
@@ -519,9 +623,27 @@ async function fetchActivity(
           text: `Withdrawal #${args.id} ${WITHDRAWAL_STATUS[Number(args.status)] ?? "closed"}`,
         });
         break;
+      case "MemberAdded":
+        memberSet.add(String(args.member).toLowerCase() as Address);
+        log.push({
+          when: w,
+          actor: "coordinator",
+          kind: "member_added",
+          text: `Added member ${shortAddr(String(args.member))}`,
+        });
+        break;
+      case "MemberRemoved":
+        memberSet.delete(String(args.member).toLowerCase() as Address);
+        log.push({
+          when: w,
+          actor: "coordinator",
+          kind: "member_removed",
+          text: `Removed member ${shortAddr(String(args.member))}`,
+        });
+        break;
     }
   }
   movements.reverse();
   log.reverse();
-  return { movements, log };
+  return { movements, log, members: [...memberSet] };
 }
