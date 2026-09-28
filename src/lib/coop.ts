@@ -1,5 +1,6 @@
 import {
   createPublicClient,
+  fallback,
   http,
   parseAbi,
   zeroAddress,
@@ -24,6 +25,15 @@ export const COOP_CHAIN_ID = sepolia.id;
 export const COOP_RPC =
   process.env.NEXT_PUBLIC_COOP_RPC_URL ||
   "https://eth-sepolia.g.alchemy.com/v2/Rr57Q41YGfkxYkx0kZp3EOQs86HatGGE";
+/**
+ * Public Sepolia fallback used when the primary RPC is unavailable (e.g. the
+ * Alchemy endpoint hitting its monthly capacity limit and returning 429). Keeps
+ * the read path alive so the whole app doesn't go dark on a single provider.
+ * Overridable via NEXT_PUBLIC_COOP_RPC_FALLBACK_URL.
+ */
+export const COOP_RPC_FALLBACK =
+  process.env.NEXT_PUBLIC_COOP_RPC_FALLBACK_URL ||
+  "https://ethereum-sepolia-rpc.publicnode.com";
 const COOP_EXPLORER = "https://sepolia.etherscan.io";
 /** First block of the deployment — events are scanned from here. */
 const DEPLOY_BLOCK = 10875043n;
@@ -107,7 +117,9 @@ export const coopWithdrawalsAbi = parseAbi([
 /** Read-only client for the cooperative's chain (independent of the wallet). */
 export const coopClient = createPublicClient({
   chain: COOP_CHAIN,
-  transport: http(COOP_RPC),
+  // Fall back to a public Sepolia RPC if the primary endpoint fails (e.g. 429
+  // "Monthly capacity limit exceeded"), so chain reads don't go dark.
+  transport: fallback([http(COOP_RPC), http(COOP_RPC_FALLBACK)]),
 });
 
 export function coopTxUrl(hash: string): string {
