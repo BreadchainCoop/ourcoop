@@ -25,6 +25,7 @@ import {
   coopTokenAbi,
   coopTxUrl,
   coopUsdAbi,
+  coopVaultAbi,
   coopVotingAbi,
   coopWithdrawalsAbi,
   toCoopWei,
@@ -1110,10 +1111,12 @@ function DepositView({ state }: { state: CoopState }) {
   const [faucetAmt, setFaucetAmt] = useState("500");
   const [depositAmt, setDepositAmt] = useState("100");
   const [redeemAmt, setRedeemAmt] = useState("");
+  const [yieldAmt, setYieldAmt] = useState("100");
   const faucet = useCoopTx();
   const approve = useCoopTx();
   const mint = useCoopTx();
   const redeem = useCoopTx();
+  const simYield = useCoopTx();
 
   const depositNum = Number(depositAmt || 0);
   const needsApproval = depositNum > 0 && state.usdAllowance < depositNum;
@@ -1292,6 +1295,52 @@ function DepositView({ state }: { state: CoopState }) {
             hash={redeem.hash}
             error={redeem.error}
             successLabel="Redeemed 1:1."
+          />
+        </Card>
+        <Card>
+          <Heading4 className="text-text-standard">
+            Simulate yield
+            <span className="text-surface-grey-2 ml-2 text-xs font-normal">
+              testnet
+            </span>
+          </Heading4>
+          <Body className="text-surface-grey-2 mt-2 text-sm">
+            Mints test USD into the savings vault so its assets exceed the
+            pooled principal. That surplus is the yield the cooperative
+            distributes — use it to seed a round when there&apos;s nothing to
+            distribute yet.
+          </Body>
+          <input
+            type="number"
+            min={0}
+            value={yieldAmt}
+            onChange={(e) => setYieldAmt(e.target.value)}
+            className="border-paper-2 bg-paper-main text-text-standard focus:border-core-orange mt-3 w-full rounded-xl border px-3 py-2 text-sm outline-none"
+          />
+          <Button
+            app="fund"
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            disabled={
+              !isConnected || Number(yieldAmt || 0) <= 0 || simYield.isBusy
+            }
+            onClick={() =>
+              void simYield.run({
+                address: COOP.vault,
+                abi: coopVaultAbi,
+                functionName: "simulateYield",
+                args: [toCoopWei(Number(yieldAmt))],
+              })
+            }
+          >
+            {simYield.isBusy ? "Simulating…" : "Simulate yield"}
+          </Button>
+          <TxLine
+            status={simYield.status}
+            hash={simYield.hash}
+            error={simYield.error}
+            successLabel="Yield simulated — a distribution round can now run."
           />
         </Card>
       </div>

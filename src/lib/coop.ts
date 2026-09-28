@@ -49,6 +49,8 @@ export const COOP = {
   distributionManager: "0x6d0504B381A3A04Ff9457A9CB0E64e76EfB0c6bb",
   cycleModule: "0x30524E1A1FCcc8fF613d2f19443A10d878219Ff0",
   withdrawals: "0x74Eff5B39853b2eD4300a4abE7D544304f82d171",
+  /** MockUSDVault — the Sepolia sDAI stand-in the principal is parked in. */
+  vault: "0x29525FD7A8Fc724ED6c64b9336F337C8992d8d3C",
 } as const satisfies Record<string, Address>;
 
 export const coopTokenAbi = parseAbi([
@@ -99,6 +101,14 @@ export const coopDmAbi = parseAbi([
 export const coopStrategyAbi = parseAbi([
   "event ProjectFunded(address indexed project, uint256 amount)",
   "event RoundDistributed(uint256 indexed distributionId, uint256 pool, uint256 distributed)",
+]);
+/**
+ * MockUSDVault (Sepolia sDAI stand-in). `simulateYield` mints extra test USD
+ * into the vault so its assets exceed the deposited principal — the surplus is
+ * the yield the distribution manager claims. Testnet-only demo helper.
+ */
+export const coopVaultAbi = parseAbi([
+  "function simulateYield(uint256 amount)",
 ]);
 export const coopWithdrawalsAbi = parseAbi([
   "function getFunds() view returns (uint256[4])",
